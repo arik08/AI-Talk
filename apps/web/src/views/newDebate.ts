@@ -1,5 +1,5 @@
 import {
-  ChevronRight, ClipboardPaste, Drama, FileText, Globe, Library, RotateCcw, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Upload,
+  ChevronRight, ClipboardPaste, Drama, FileText, Globe, Library, RotateCcw, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Upload, Users,
 } from 'lucide';
 import { api } from '../api';
 import { AVATAR_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
@@ -208,6 +208,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       .map(([v, l]) => h('option', { value: v, selected: draft.policy === v }, l)));
   const genBtn = h('button', { type: 'button', class: 'btn', onclick: () => generateAll() }, icon(Sparkles, 18), '자동 생성');
   const castGrid = h('div', { class: 'cast-grid' });
+  const bulkBar = h('div', { class: 'panel bulk-bar hidden' });
   const countNote = h('span', { class: 'muted small' });
   page.append(h('section', { class: 'block' },
     h('h2', { class: 'block-title' }, '참가자', h('small', null, '주제에 맞춰 AI가 만들거나, 보관함에서 고릅니다')),
@@ -216,7 +217,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       seg<AvatarSet | 'mix'>([...AVATAR_SETS.map((s) => [s.id, s.label] as [AvatarSet, string]), ['mix', '섞어서']],
         () => draft.avatarSet, (v) => { draft.avatarSet = v; reassignAvatars(); }),
       genBtn, toggle('진행자', () => draft.moderator, (v) => { draft.moderator = v; }), countNote),
-    castGrid));
+    bulkBar, castGrid));
 
   function setCount(n: number): void {
     draft.count = Math.max(2, Math.min(10, n));
@@ -322,14 +323,57 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   const onDocClick = (e: MouseEvent) => { if (menu && !(e.target as HTMLElement).closest('.menu, .lib-btn')) closeMenu(); };
   document.addEventListener('click', onDocClick);
 
+  const shortModel = (id: string) => ((status?.models ?? []).find((m) => m.id === id)?.label ?? id).replace(/^Claude /, '');
+
+  /** 참가자 한 명의 모델과 추론 노력. 따로 정하지 않았으면 공통 설정을 따르고, 그 공통 설정이 무엇인지 이름으로 보여 준다. */
   function modelSelects(p: Slot): HTMLElement {
     const models = status?.models ?? [];
-    const model = h('select', { class: 'select', onchange: () => { p.model = model.value || undefined; p.effort = undefined; paintCast(); } },
-      h('option', { value: '' }, '기본 모델'), models.map((m) => h('option', { value: m.id, selected: p.model === m.id }, m.label)));
-    const efforts = (models.find((m) => m.id === (p.model || draft.model)) ?? models[0])?.efforts ?? [];
-    const effort = h('select', { class: 'select', onchange: () => { p.effort = effort.value || undefined; } },
-      h('option', { value: '' }, '기본 노력'), efforts.map((e) => h('option', { value: e, selected: p.effort === e }, e)));
-    return h('div', { class: 'row', style: 'flex-wrap:nowrap' }, model, effort);
+    if (p.model === draft.model) p.model = undefined;            // 공통과 같으면 따로 정한 것이 아니다
+    const own = models.find((m) => m.id === p.model);
+    const efforts = (own ?? models.find((m) => m.id === draft.model) ?? models[0])?.efforts ?? [];
+    const commonFits = efforts.includes(draft.effort);
+    if (p.effort === draft.effort && commonFits) p.effort = undefined;
+    if (own && !p.effort && !commonFits) p.effort = own.default_effort;   // 이 모델이 공통 노력을 지원하지 않으면 모델의 기본값으로
+    const model = h('select', { class: 'select', tip: '이 참가자가 쓸 모델', 'aria-label': `${p.name}의 모델`,
+      onchange: () => { p.model = model.value || undefined; p.effort = undefined; paintCast(); } },
+      h('option', { value: '' }, `${shortModel(draft.model)} (공통)`),
+      models.filter((m) => m.id !== draft.model).map((m) => h('option', { value: m.id, selected: p.model === m.id }, shortModel(m.id))));
+    const effort = h('select', { class: 'select', tip: '이 참가자의 추론 노력', 'aria-label': `${p.name}의 추론 노력`,
+      onchange: () => { p.effort = effort.value || undefined; paintCast(); } },
+      commonFits ? h('option', { value: '' }, `${draft.effort} (공통)`) : null,
+      efforts.filter((e) => !(commonFits && e === draft.effort)).map((e) => h('option', { value: e, selected: p.effort === e }, e)));
+    return h('div', { class: `row model-row${p.model || p.effort ? ' is-own' : ''}`, style: 'flex-wrap:nowrap' }, model, effort);
+  }
+
+  /* 전원 일괄 설정: 평소에는 한 모델로 통일해 쓴다 (캐시 할인이 가장 크다). 여기서 고르면 공통 설정이 바뀌고 따로 정한 것은 지워진다 */
+  const bulk = { model: draft.model, effort: draft.effort };
+  function paintBulk(): void {
+    bulkBar.classList.toggle('hidden', !draft.perSpeaker);
+    if (!draft.perSpeaker) return;
+    const models = status?.models ?? [];
+    if (!models.some((m) => m.id === bulk.model)) bulk.model = draft.model;
+    const efforts = models.find((m) => m.id === bulk.model)?.efforts ?? [];
+    if (!efforts.includes(bulk.effort)) bulk.effort = models.find((m) => m.id === bulk.model)?.default_effort ?? efforts[0] ?? '';
+    const own = draft.cast.filter((p) => p && (p.model || p.effort)).length;
+    const same = bulk.model === draft.model && bulk.effort === draft.effort && own === 0;
+    const model = h('select', { class: 'select', 'aria-label': '전원에게 적용할 모델', onchange: () => { bulk.model = model.value; paintBulk(); } },
+      models.map((m) => h('option', { value: m.id, selected: bulk.model === m.id }, m.price ? `${m.label} · 입력 ${fmtCost(m.price.in)} / 출력 ${fmtCost(m.price.out)}` : m.label)));
+    const effort = h('select', { class: 'select', 'aria-label': '전원에게 적용할 추론 노력', onchange: () => { bulk.effort = effort.value; paintBulk(); } },
+      efforts.map((e) => h('option', { value: e, selected: bulk.effort === e }, e)));
+    bulkBar.replaceChildren(
+      h('span', { class: 'bulk-title' }, icon(Users, 18), '전원 일괄 설정'), model, effort,
+      h('button', { type: 'button', class: 'btn', disabled: same, onclick: () => {
+        draft.model = bulk.model;
+        draft.effort = bulk.effort;
+        draft.cast.forEach((p) => { if (p) { p.model = undefined; p.effort = undefined; } });
+        modelSel.value = draft.model;
+        paintEfforts();
+        paintCast();
+        toast(`참가자 전원이 ${shortModel(draft.model)} · ${draft.effort}(으)로 맞춰졌습니다.`);
+      } }, '전원에게 적용'),
+      h('span', { class: 'muted small' }, own
+        ? `지금 ${own}명이 공통 설정(${shortModel(draft.model)} · ${draft.effort})과 다르게 정해져 있습니다`
+        : `지금 전원이 ${shortModel(draft.model)} · ${draft.effort}입니다. 한 모델로 통일하면 캐시 할인이 가장 큽니다`));
   }
 
   function paintCast(): void {
@@ -340,6 +384,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     genBtn.disabled = busy;
     clear(genBtn);
     genBtn.append(icon(busy ? LoaderCircle : Sparkles, 18, busy ? 'spin' : ''), busy ? '만드는 중' : draft.cast.some(Boolean) ? '다시 자동 생성' : '자동 생성');
+    paintBulk();
     clear(castGrid);
     while (draft.cast.length < draft.count) draft.cast.push(null);
     draft.cast.forEach((p, i) => {
@@ -417,14 +462,14 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     on: () => draft.turnsOn, setOn: (v) => { draft.turnsOn = v; } });
   const minutesRow = limitRow({ min: 2, max: 120, sliderMax: 60, unit: '분', get: () => draft.maxMinutes, set: (v) => { draft.maxMinutes = v; },
     on: () => draft.minutesOn, setOn: (v) => { draft.minutesOn = v; } });
-  const effortSel = h('select', { class: 'select', onchange: () => { draft.effort = effortSel.value; paintStart(); } });
+  const effortSel = h('select', { class: 'select', onchange: () => { draft.effort = effortSel.value; bulk.effort = draft.effort; if (draft.perSpeaker) paintCast(); else paintStart(); } });
   const paintEfforts = () => {
     const m = models.find((x) => x.id === draft.model) ?? models[0];
     if (m && !m.efforts.includes(draft.effort)) draft.effort = m.default_effort;
     clear(effortSel);
     (m?.efforts ?? []).forEach((e) => effortSel.append(h('option', { value: e, selected: draft.effort === e }, e)));
   };
-  const modelSel = h('select', { class: 'select', onchange: () => { draft.model = modelSel.value; paintEfforts(); paintStart(); } },
+  const modelSel = h('select', { class: 'select', onchange: () => { draft.model = modelSel.value; paintEfforts(); bulk.model = draft.model; bulk.effort = draft.effort; if (draft.perSpeaker) paintCast(); else paintStart(); } },
     models.map((m) => h('option', { value: m.id, selected: draft.model === m.id }, m.price ? `${m.label} · 입력 ${fmtCost(m.price.in)} / 출력 ${fmtCost(m.price.out)}` : m.label)));
   paintEfforts();
   const searches = h('input', { class: 'input', type: 'number', min: 1, max: 5, value: draft.maxSearches, onchange: () => { draft.maxSearches = Math.max(1, Math.min(5, Number(searches.value) || 2)); persist(); } });
@@ -456,10 +501,10 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     h('details', { class: 'adv' },
       h('summary', null, icon(ChevronRight, 16), '고급 설정'),
       h('div', { class: 'settings-grid' },
-        field('모델', modelSel, '참가자, 진행자, 연출자가 모두 이 모델을 씁니다. 요금은 100만 토큰당 원화입니다'),
+        field('모델', modelSel, '공통 설정입니다. 참가자, 진행자, 연출자가 모두 이 모델을 씁니다. 요금은 100만 토큰당 원화입니다'),
         field('추론 노력', effortSel),
         field('화자별 모델', toggle('참가자마다 모델과 추론 노력을 따로 정하기', () => draft.perSpeaker, (v) => { draft.perSpeaker = v; paintCast(); }),
-          '성능이 다른 AI를 비교할 때 씁니다. 캐시 할인이 줄어듭니다'),
+          '성능이 다른 AI를 비교할 때 씁니다. 켜면 참가자 목록 위에 전원 일괄 설정이 나옵니다. 모델이 섞이면 캐시 할인이 줄어듭니다'),
         field('끼어들기', toggle('말을 끊고 끼어들 수 있음', () => draft.interjection, (v) => { draft.interjection = v; })),
         field('발언 사이 뜸', h('div', null, gap, gapNote)),
         field('발언당 검색 횟수', h('div', { class: 'inline-num' }, searches, h('span', { class: 'muted' }, '회'))),

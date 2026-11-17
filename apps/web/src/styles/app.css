@@ -292,6 +292,11 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .stepper button:disabled { opacity: .35; cursor: not-allowed; }
 .stepper b { min-width: 3.5rem; text-align: center; font-family: var(--font-head); font-size: 1.125rem; color: var(--gold-hi); }
 .field-label { font-size: .875rem; color: var(--muted); margin-bottom: .375rem; display: flex; align-items: center; gap: .375rem; }
+.bulk-bar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; padding: .625rem .875rem; margin-bottom: 1rem; border-left: 3px solid var(--gold-lo); }
+.bulk-bar .select { width: auto; max-width: 100%; }
+.bulk-title { display: inline-flex; align-items: center; gap: .5rem; color: var(--gold-hi); font-weight: 600; }
+.model-row .select { min-width: 0; text-overflow: ellipsis; }
+.model-row.is-own .select { border-color: var(--gold-lo); }   /* 공통 설정과 다르게 정한 참가자 */
 .cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr)); gap: 1rem; }
 .pcard {
   --c: var(--gold); position: relative; display: flex; flex-direction: column; gap: .75rem; padding: 1.125rem 1.125rem .875rem;
