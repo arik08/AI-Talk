@@ -1,6 +1,6 @@
 import {
-  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, Link, ListOrdered, LoaderCircle, Megaphone, Pause, Play, Rewind,
-  Search, Send, SkipForward, TriangleAlert, Zap, type IconNode,
+  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, Link, ListOrdered, LoaderCircle, Megaphone, Pause, PenLine, Play,
+  Rewind, Search, Send, SkipForward, TriangleAlert, Zap, type IconNode,
 } from 'lucide';
 import { api } from '../api';
 import { createAvatar, setAvatar } from '../avatar/avatar';
@@ -32,6 +32,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   let stick = true;
   let writingMinutes = false;
   let minutesEl: HTMLElement | null = null;
+  let waitEl: HTMLElement | null = null;   // 회의록을 쓰는 동안 그 자리에 놓는 카드
+  let waitTimer = 0;
   let costEl: HTMLElement | null = null;
   // 비용: 토론 중에는 사용량 이벤트로, 끝난 뒤에는 저장된 기록과 회의록 응답으로 채운다
   const money = { cost: 0, parts: {} as Record<string, number>, searches: 0, rate: ctx.status?.pricing?.usd_krw ?? USD_KRW, searchUsd: ctx.status?.pricing?.search_usd ?? 0.01 };
@@ -322,7 +324,36 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   }
 
   /* ---------- 회의록 ---------- */
+  /** 회의록을 쓰는 동안 보여 주는 카드. 펜이 움직이고 줄이 차례로 써 내려가며, 지난 시간이 올라간다.
+   *  단계별 진행률은 알 수 없으므로 지어내지 않고, 일이 돌아가고 있다는 것과 걸린 시간만 보여 준다. */
+  function showMinutesWait(scroll = false): void {
+    hideMinutesWait();
+    const started = performance.now();
+    const elapsed = h('b', null, '00:00');
+    waitEl = h('div', { class: 'panel frame summary minutes-wait', role: 'status' },
+      h('div', { class: 'mw-head' },
+        h('div', { class: 'mw-pen' }, icon(PenLine, 22)),
+        h('div', { class: 'mw-title' },
+          h('h2', null, '회의록을 쓰는 중입니다'),
+          h('p', null, `발언 ${cards.size}개를 다시 읽고 전체 흐름, 시간대별 쟁점, 합의와 결론을 정리합니다.`)),
+        h('div', { class: 'mw-clock', tip: '쓰기 시작한 뒤 지난 시간', 'aria-hidden': 'true' }, icon(Hourglass, 14), elapsed)),
+      h('div', { class: 'mw-lines', 'aria-hidden': 'true' }, [0, 1, 2, 3].map(() => h('i', null))));
+    waitTimer = window.setInterval(() => { elapsed.textContent = fmtTime((performance.now() - started) / 1000); }, 1000);
+    if (minutesEl) minutesEl.before(waitEl);   // 다시 쓰는 중이면 예전 회의록 바로 위에
+    else if (costEl) costEl.before(waitEl);
+    else inner.append(waitEl);
+    if (scroll) waitEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    else follow();
+  }
+
+  function hideMinutesWait(): void {
+    window.clearInterval(waitTimer);
+    waitEl?.remove();
+    waitEl = null;
+  }
+
   function showMinutes(m: any, scroll = false): void {
+    hideMinutesWait();
     minutesEl?.remove();
     const list = (title: string, items: string[]) => h('div', null, h('h3', null, title),
       items?.length ? h('ul', null, items.map((it) => h('li', null, it))) : h('p', { class: 'muted' }, '없음'));
@@ -376,6 +407,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     if (writingMinutes || !record) return;
     writingMinutes = true;
     paintControls();
+    showMinutesWait(true);
     try {
       const res = await api.minutes(id);
       record.minutes = res.minutes;
@@ -390,6 +422,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     } catch (err) {
       toast((err as Error).message, 'error');
     } finally {
+      hideMinutesWait();
       writingMinutes = false;
       paintControls();
     }
@@ -482,13 +515,14 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         addNotice('error', ev.message);
         if (!ev.fatal) { state = 'error'; paintControls(); }
         break;
-      case 'summarizing': if (!instant) addNotice('info', '회의록을 쓰는 중입니다.'); break;
+      case 'summarizing': if (!instant) showMinutesWait(); break;
       case 'minutes':
         if (record) record.minutes = ev.minutes;
         if (!instant) { showMinutes(ev.minutes); follow(); }
         break;
       case 'summary': addSummary(ev); break;
       case 'end':
+        hideMinutesWait();   // 회의록을 쓰지 못하고 끝난 경우에도 대기 카드를 남기지 않는다
         state = 'ended';
         phaseChip.querySelector('span')!.textContent = ev.state === 'aborted' ? '중단됨' : '토론 끝';
         if (speaking) setAvatar(seats.get(speaking)!.av, { state: 'listening' });
@@ -564,6 +598,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   /* ---------- 다시 보기 ---------- */
   function reset(): void {
     window.clearTimeout(replayTimer);
+    hideMinutesWait();
     clear(inner);
     minutesEl = null;
     costEl = null;
@@ -666,5 +701,6 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     stream?.close();
     observer.disconnect();
     window.clearTimeout(replayTimer);
+    window.clearInterval(waitTimer);
   };
 }
