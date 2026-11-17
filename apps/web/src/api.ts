@@ -30,7 +30,7 @@ export const api = {
   deletePersona: (id: string) => request<{ ok: boolean }>(`/api/personas/${id}`, { method: 'DELETE' }),
   importPersonas: (items: unknown[]) => request<{ added: number }>('/api/personas/import', json(items)),
   draftPersona: (hint: string) => request<Partial<Persona>>('/api/personas/draft', json({ hint })),
-  cast: (body: { topic: string; concept?: string; count: number; policy: string; fixed: Partial<Persona>[]; materials: string; model?: string; effort?: string }) =>
+  cast: (body: { topic: string; concept?: string; tone?: string; count: number; policy: string; fixed: Partial<Persona>[]; materials: string; model?: string; effort?: string }) =>
     request<{ personas: Partial<Persona>[] }>('/api/cast', json(body)),
   uploadMaterial: (file: File) => {
     const form = new FormData();

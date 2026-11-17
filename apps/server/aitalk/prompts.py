@@ -19,6 +19,24 @@ RULES = """당신은 여러 인물이 등장하는 토론 프로그램의 배우
 - 기록에서 '—'로 끝난 발언은 다음 사람이 끼어들어 끊긴 것입니다.
 - 사실을 지어내지 않습니다. 확실하지 않은 수치는 어림이라고 밝히거나 쓰지 않습니다."""
 
+# 분위기. "default"는 여기에 없다: 분위기에 대한 지시를 아무것도 넣지 않고 그대로 진행한다.
+TONES = {
+    "humorous": "이 토론은 유머러스한 분위기입니다. 참가자들은 재치 있는 농담, 익살스러운 비유, 가벼운 놀림을 섞어 말합니다. "
+                "웃음을 주되 각자의 주장과 논리는 분명히 유지합니다. 억지스러운 농담이나 같은 농담의 되풀이는 피하고, "
+                "인물마다 자기 성격에 맞는 방식으로 웃깁니다.",
+    "serious": "이 토론은 진지한 분위기입니다. 농담이나 가벼운 말은 삼가고, 근거와 논리를 차분하고 무게 있게 다룹니다. "
+               "상대의 주장을 정확히 짚고, 감정적인 표현보다 사실과 논증으로 말합니다.",
+    "creative": "이 토론은 창의적인 분위기입니다. 뻔한 주장 대신 새로운 관점, 뜻밖의 비유, 사고 실험, '만약 ~라면' 같은 가정을 "
+                "적극적으로 꺼냅니다. 상대의 생각을 받아 더 멀리 밀고 가 보기도 합니다. 엉뚱해도 좋지만 주제에서 벗어나지는 않습니다.",
+}
+TONE_LABEL = {"humorous": "유머러스", "serious": "진지함", "creative": "창의적"}
+# 발언 지시 끝에 덧붙이는 한 줄. 앞쪽의 분위기 설명만으로는 인물의 성격 설정에 묻혀 효과가 약했다.
+TONE_HINT = {
+    "humorous": "분위기는 유머러스합니다. 이번 발언에 이 인물다운 재치 있는 농담이나 익살스러운 비유를 하나는 넣으세요.",
+    "serious": "분위기는 진지합니다. 농담이나 가벼운 표현 없이 근거와 논리로만 무게 있게 말하세요.",
+    "creative": "분위기는 창의적입니다. 이번 발언에 뜻밖의 비유, 사고 실험, '만약 ~라면' 같은 가정 가운데 하나는 넣어 새로운 각도를 여세요.",
+}
+
 MODE_LABEL = {
     "sequential": "처음부터 끝까지 정해진 순서로 돌아가며 말합니다.",
     "free": "정해진 순서 없이, 말하고 싶은 사람이 말합니다.",
@@ -49,6 +67,9 @@ def shared_context(cfg: dict, briefing: str) -> str:
                   "아래는 이 자리가 어떤 자리인지에 대한 설정입니다. 참가자 모두에게 똑같이 적용됩니다. "
                   "말투, 격식, 분위기, 서로를 대하는 태도를 여기에 맞추세요. 인물 각자의 성격은 그 안에서 드러냅니다.",
                   concept, ""]
+    tone = TONES.get(cfg.get("tone") or "default")
+    if tone:
+        parts += ["# 분위기", tone, ""]
     parts += ["# 형식",
              MODE_LABEL.get(cfg.get("mode", "mixed"), ""),
              f"발언 길이의 기본은 {LENGTHS.get(cfg.get('length', 'normal'))}입니다.",
@@ -172,10 +193,12 @@ CAST_SYSTEM = """당신은 토론 프로그램의 캐스팅 담당입니다. 주
 
 
 def cast_prompt(topic: str, count: int, policy: str, fixed: list[dict], materials: str,
-                concept: str = "") -> str:
+                concept: str = "", tone: str = "default") -> str:
     lines = [f"토론 주제:\n{topic.strip()}", ""]
     if concept.strip():
         lines += ["이 토론의 설정과 분위기 (이 자리에 어울리는 사람들로 구성하세요):", concept.strip(), ""]
+    if tone in TONE_LABEL:
+        lines += [f"토론의 분위기: {TONE_LABEL[tone]}. 이 분위기에서 잘 살아날 인물들로 구성하세요.", ""]
     lines += [f"참가자 {count}명을 만드세요.",
              f"구성 방침: {POLICIES.get(policy, POLICIES['auto'])}"]
     if fixed:

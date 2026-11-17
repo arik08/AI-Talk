@@ -86,4 +86,6 @@ export const INTENT_LABEL: Record<string, string> = {
   open: '개회', statement: '모두발언', moderate: '진행', closing: '마무리 발언', wrap: '정리',
 };
 
+export const TONE_LABEL: Record<string, string> = { default: '기본', humorous: '유머러스', serious: '진지함', creative: '창의적' };
+
 export const PALETTE = ['#E0764A', '#5FB6A8', '#8FA8E8', '#C98BD9', '#9CC766', '#E36F8A', '#5FA8D8', '#D9A441', '#C9B38A', '#7FD1C0'];

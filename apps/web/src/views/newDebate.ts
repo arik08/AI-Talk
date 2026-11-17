@@ -35,13 +35,14 @@ const draft = {
   badge: 'on',
   summary: true,
   reactions: 'smart',
+  tone: 'default',
   hiddenAgenda: null as boolean | null,
 };
 
 /* 진행 설정은 이 브라우저에 기억해 두고 다음에 그대로 쓴다. 주제, 자료, 참가자는 기억하지 않는다. */
 const SETTING_KEYS = ['count', 'policy', 'avatarSet', 'moderator', 'mode', 'turnsOn', 'maxTurns', 'minutesOn', 'maxMinutes',
   'length', 'speed', 'interjection', 'gapScale', 'search', 'maxSearches', 'model', 'effort', 'perSpeaker', 'badge', 'summary',
-  'reactions', 'hiddenAgenda'] as const;
+  'reactions', 'tone', 'hiddenAgenda'] as const;
 const STORE_KEY = 'aitalk.settings.v1';
 const pick = (): Record<string, unknown> => Object.fromEntries(SETTING_KEYS.map((k) => [k, (draft as any)[k]]));
 const DEFAULTS = pick();
@@ -61,6 +62,7 @@ function restore(): void {
       if (base === null ? (value === null || typeof value === 'boolean') : typeof value === typeof base) (draft as any)[k] = value;
     }
     if (!['auto', 'off'].includes(draft.search)) draft.search = 'auto';
+    if (!['default', 'humorous', 'serious', 'creative'].includes(draft.tone)) draft.tone = 'default';
     draft.count = Math.max(2, Math.min(10, Math.round(draft.count) || 4));
   } catch { /* 깨진 값은 무시한다 */ }
 }
@@ -232,7 +234,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     paintCast();
     try {
       const { personas } = await api.cast({
-        topic: draft.topic, concept: draft.concept, count: draft.count, policy: draft.policy, fixed: kept,
+        topic: draft.topic, concept: draft.concept, tone: draft.tone, count: draft.count, policy: draft.policy, fixed: kept,
         materials: draft.materials.map((m) => m.text).join('\n\n').slice(0, 6000),
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
@@ -262,7 +264,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     paintCast();
     try {   // 다른 참가자를 알려 주어 겹치지 않는 인물을 받는다
       const { personas } = await api.cast({
-        topic: draft.topic, concept: draft.concept, count: others.length + 1, policy: draft.policy, fixed: others, materials: '',
+        topic: draft.topic, concept: draft.concept, tone: draft.tone, count: others.length + 1, policy: draft.policy, fixed: others, materials: '',
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
       const fresh = personas[others.length];
@@ -426,6 +428,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         '혼합: 모두발언은 차례대로, 그 뒤는 말하고 싶은 사람이'),
       field('턴 수 제한', turnsRow, '슬라이더는 100턴까지, 숫자로는 200턴까지 적을 수 있습니다'),
       field('시간 제한', minutesRow, '실제로 말했다면 걸렸을 시간으로 잽니다. 둘 중 먼저 닿는 쪽에서 마무리합니다'),
+      field('분위기', seg([['default', '기본'], ['humorous', '유머러스'], ['serious', '진지함'], ['creative', '창의적']], () => draft.tone, (v) => { draft.tone = v; }),
+        '기본: 분위기에 대한 지시 없이 그대로 진행합니다'),
       field('발언 길이', seg([['short', '짧게'], ['normal', '보통'], ['long', '길게']], () => draft.length, (v) => { draft.length = v; })),
       field('출력 속도', seg([['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']], () => draft.speed, (v) => { draft.speed = v; })),
       field('웹 검색', seg([['auto', '자동'], ['off', '끔']], () => draft.search, (v) => { draft.search = v; }),
@@ -480,7 +484,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     startBtn.append(icon(LoaderCircle, 20, 'spin'), '무대를 준비하는 중');
     try {
       const { id } = await api.startDebate({
-        topic: draft.topic, concept: draft.concept, materials: draft.materials.map((m) => ({ name: m.name, text: m.text })), urls: draft.urls,
+        topic: draft.topic, concept: draft.concept, tone: draft.tone, materials: draft.materials.map((m) => ({ name: m.name, text: m.text })), urls: draft.urls,
         participants: draft.cast.map((p, i) => {
           const { fromLibrary: _f, ...rest } = p!;
           return { ...rest, id: `s${i + 1}`, model: draft.perSpeaker ? rest.model : undefined, effort: draft.perSpeaker ? rest.effort : undefined };

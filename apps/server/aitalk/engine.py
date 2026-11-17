@@ -424,8 +424,9 @@ class Debate:
             try:
                 await self._gate()
                 private = speaker.get("hidden", "") if self.cfg.get("hidden_agenda", True) else ""
+                hint = prompts.TONE_HINT.get(self.cfg.get("tone") or "default", "")
                 speech = await self.ctx.speak(
-                    speaker=speaker["name"], directive=turn.directive, private=private,
+                    speaker=speaker["name"], directive=f"{turn.directive} {hint}".strip(), private=private,
                     model=self._model(speaker), effort=self._effort(speaker), on_event=on_event)
                 if not speech.text.strip():
                     raise ProviderError("모델이 빈 발언을 돌려주었습니다.")

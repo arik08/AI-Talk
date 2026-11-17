@@ -1,4 +1,4 @@
-import { INTENT_LABEL, type DebateRecord } from './types';
+import { INTENT_LABEL, TONE_LABEL, type DebateRecord } from './types';
 import { fmtTime } from './ui/dom';
 
 /** 회의록을 마크다운으로. */
@@ -35,7 +35,8 @@ export function recordToMarkdown(rec: DebateRecord): string {
   const lines: string[] = [`# ${cfg.topic}`, '',
     `- 일시: ${rec.created.replace('T', ' ')}`,
     `- 참석자: ${people.join(', ')}`];
-  if (cfg.concept) lines.push(`- 설정과 분위기: ${cfg.concept}`);
+  if (cfg.concept) lines.push(`- 설정: ${cfg.concept}`);
+  if (cfg.tone && cfg.tone !== 'default') lines.push(`- 분위기: ${TONE_LABEL[cfg.tone] ?? cfg.tone}`);
   lines.push(`- 분량: ${rec.turns ?? rec.speeches.length}턴, 토론 시계 ${fmtTime(rec.seconds ?? 0)}`, '');
 
   if (rec.minutes) lines.push(...minutesToMarkdown(rec.minutes));

@@ -6,7 +6,7 @@ import { api } from '../api';
 import { createAvatar, setAvatar } from '../avatar/avatar';
 import { copyText, recordToMarkdown } from '../export';
 import type { AppContext } from '../main';
-import { INTENT_LABEL, MOOD_LABEL, type DebateEvent, type DebateRecord, type Mood, type Persona } from '../types';
+import { INTENT_LABEL, MOOD_LABEL, TONE_LABEL, type DebateEvent, type DebateRecord, type Mood, type Persona } from '../types';
 import { clear, fmtTime, h, icon, put, safeColor, toast } from '../ui/dom';
 
 interface Seat { persona: Persona; tile: HTMLElement; av: HTMLElement; urge: HTMLElement; status: HTMLElement; badge: HTMLElement }
@@ -112,7 +112,9 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     } else {
       const mats = record?.config.materials ?? [];
       const concept = record?.config.concept;
-      if (!mats.length && !briefing && !concept) { sideBody.append(h('p', { class: 'muted' }, '붙인 자료가 없습니다.')); return; }
+      const tone = record?.config.tone && record.config.tone !== 'default' ? TONE_LABEL[record.config.tone] : '';
+      if (!mats.length && !briefing && !concept && !tone) { sideBody.append(h('p', { class: 'muted' }, '붙인 자료가 없습니다.')); return; }
+      if (tone) sideBody.append(h('h4', null, '분위기'), h('div', { class: 'brief', style: 'margin-bottom:1rem' }, tone));
       if (concept) sideBody.append(h('h4', null, '설정과 분위기'), h('div', { class: 'brief', style: 'margin-bottom:1rem' }, concept));
       if (mats.length) sideBody.append(h('h4', null, '올린 문서'), h('div', { class: 'kv', style: 'margin-bottom:1rem' },
         mats.flatMap((m: any) => [h('span', null, m.name), h('span', null, `${Number(m.chars).toLocaleString()}자`)])));

@@ -160,6 +160,7 @@ async def persona_draft(body: DraftIn) -> dict:
 class CastIn(BaseModel):
     topic: str
     concept: str = ""
+    tone: str = "default"
     count: int = 4
     policy: str = "auto"
     fixed: list[dict] = Field(default_factory=list)
@@ -178,7 +179,7 @@ async def cast(body: CastIn) -> dict:
         data, usage = await provider.generate_json(
             system=prompts.CAST_SYSTEM,
             prompt=prompts.cast_prompt(body.topic, count, body.policy, body.fixed[:count], body.materials,
-                                       body.concept),
+                                       body.concept, body.tone),
             schema=prompts.cast_schema(), model=body.model or provider.default_model,
             effort=body.effort or provider.default_effort)
     except ProviderError as exc:
@@ -210,6 +211,7 @@ async def material_upload(file: UploadFile = File(...)) -> dict:
 class DebateIn(BaseModel):
     topic: str
     concept: str = ""
+    tone: str = "default"      # default | humorous | serious | creative
     participants: list[dict]
     materials: list[dict] = Field(default_factory=list)
     urls: list[str] = Field(default_factory=list)
@@ -410,4 +412,4 @@ if WEB_DIST.exists():
         target = WEB_DIST / path
         if path and target.is_file() and WEB_DIST in target.resolve().parents:
             return FileResponse(target)
-        return FileResponse(WEB_DIST / "index.html")
+        return FileResponse(WEB_DIST / "index.html", headers={"Cache-Control": "no-cache"})
