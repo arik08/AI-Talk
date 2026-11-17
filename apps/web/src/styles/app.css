@@ -491,7 +491,9 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 @keyframes tick-in { from { transform: scaleY(0); opacity: 0; } }
 .controls { display: flex; align-items: center; gap: .75rem; margin-top: .375rem; flex-wrap: wrap; }
 .controls .sep { width: 1px; height: 1.5rem; background: var(--line); }
-.intervene { flex: 1; min-width: 18rem; display: flex; gap: .5rem; }
+.intervene { flex: 1; min-width: 24rem; display: flex; align-items: center; gap: .5rem; }
+.intervene .seg { flex: none; flex-wrap: nowrap; }   /* 좁아도 두 줄로 접히지 않게. 자리가 모자라면 개입 칸 전체가 아랫줄로 내려간다 */
+.intervene .input { min-width: 0; }
 .state-chip { color: var(--ember); font-size: .9375rem; display: inline-flex; align-items: center; gap: .375rem; }
 
 /* ---------- 보관함, 기록, 설정 ---------- */
