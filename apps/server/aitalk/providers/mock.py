@@ -245,6 +245,18 @@ class MockProvider(Provider):
                     "concede": "속도 조절은 받아들일 수 있다", "hidden": "자기 조직의 예산이 걸려 있다",
                 })
             return {"personas": people}, Usage(input=400, output=600)
+        if "agenda" in props:
+            names = re.search(r"참석자: (.+)", prompt)
+            people = [n.strip() for n in names.group(1).split(",")] if names else ["참가자"]
+            return {
+                "title": "시험용 회의록", "overview": "비용과 속도를 두고 논의함. 방향에는 동의했으나 방법에서 갈림.",
+                "agenda": ["전환의 속도", "비용 부담"],
+                "discussions": [{"topic": "전환의 속도", "points": [
+                    {"name": n, "point": "자신의 입장을 밝히고 상대 주장에 반박함"} for n in people[:4]]}],
+                "agreements": ["지금 방식은 오래가기 어렵다는 데 동의함"],
+                "open_issues": ["비용을 누가 낼지 정하지 못함"], "follow_ups": [],
+                "conclusion": "속도보다 비용 부담 원칙을 먼저 정해야 한다는 의견으로 마무리됨.",
+            }, Usage(input=900, output=260)
         if "headline" in props:
             return {
                 "headline": "문제에는 동의했지만 해법의 속도에서 갈렸다",

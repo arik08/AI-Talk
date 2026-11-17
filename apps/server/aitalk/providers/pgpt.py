@@ -250,7 +250,8 @@ class PgptContext(Context):
     async def _call(self, on_event: OnEvent, tail: str, *, model: str, effort: str,
                     store: bool, schema: Optional[dict] = None) -> tuple[Speech, bool]:
         for attempt in range(2):
-            kw = self.p._base(model=model, effort=effort, store=store, search=self.search,
+            # 연출자 호출(JSON 틀)에는 검색 도구를 넣지 않는다
+            kw = self.p._base(model=model, effort=effort, store=store, search=self.search and not schema,
                               compact_threshold=self.threshold, schema=schema)
             kw["input"] = self._input(tail)
             if self.head:

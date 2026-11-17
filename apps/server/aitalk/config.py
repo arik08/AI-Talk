@@ -48,4 +48,35 @@ class Settings:
         return (forced or self.get("AITALK_PROVIDER", "mock")).lower()
 
 
+    @property
+    def host(self) -> str:
+        return self.get("AITALK_HOST", "127.0.0.1")
+
+    @property
+    def port(self) -> int:
+        try:
+            return int(self.get("AITALK_PORT", "8765"))
+        except ValueError:
+            return 8765
+
+
 settings = Settings()
+
+
+def lan_addresses() -> list[str]:
+    """이 PC가 같은 망에서 불리는 주소들."""
+    import socket
+    found: list[str] = []
+    try:   # 밖으로 나가는 길에 쓰이는 주소. 실제로 아무것도 보내지 않는다
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("10.255.255.255", 1))
+            found.append(probe.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if ip not in found:
+                found.append(ip)
+    except OSError:
+        pass
+    return [ip for ip in found if not ip.startswith("127.")]

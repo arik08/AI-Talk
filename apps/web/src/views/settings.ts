@@ -34,6 +34,18 @@ export function mountSettings(root: HTMLElement, ctx: AppContext): () => void {
           h('p', { class: 'muted small', style: 'margin-top:.875rem' },
             '바꾸려면 프로젝트 폴더의 ', h('code', null, '.env'), ' 파일에서 ', h('code', null, 'AITALK_PROVIDER'), ' 값을 고치고 서버를 다시 켭니다. 키 값은 화면에 보여 주지 않습니다.'),
           s.ready && s.message ? h('p', { class: 'muted small' }, s.message) : null)),
+      s ? h('div', { class: 'panel card-pad', style: 'margin-top:1.5rem' },
+        h('h2', { class: 'block-title', style: 'margin-bottom:.75rem' }, '다른 PC에서 접속', h('small', null, '같은 망(회사 내부망 등)에 있는 사람과 함께 봅니다')),
+        s.network?.shared
+          ? h('div', null,
+            h('p', null, '같은 망의 다른 PC에서 아래 주소로 들어올 수 있습니다.'),
+            h('div', { class: 'row', style: 'margin:.625rem 0' }, (s.network.addresses.length ? s.network.addresses : ['이 PC의 IP']).map((ip) =>
+              h('code', null, `http://${ip}:${s.network!.port}`))),
+            s.network.code
+              ? h('p', { class: 'muted small' }, '다른 PC에서 들어오면 접속 코드를 묻습니다.')
+              : h('div', { class: 'banner', style: 'margin:.75rem 0 0' }, '접속 코드가 없습니다. 같은 망의 누구나 들어와 내 AI 키로 토론을 돌리고 기록을 지울 수 있습니다. .env에 AITALK_ACCESS_CODE를 넣으면 코드를 아는 사람만 들어옵니다.'))
+          : h('p', { class: 'muted' }, '지금은 이 PC에서만 접속됩니다. 다른 PC에서도 들어오게 하려면 ', h('code', null, '.env'), '에 ',
+            h('code', null, 'AITALK_HOST=0.0.0.0'), '을 넣고 ', h('code', null, 'run.bat'), '으로 다시 켭니다. 접속 주소는 실행 창과 이 화면에 나옵니다.')) : null,
       s?.models.length ? h('div', { class: 'panel card-pad', style: 'margin-top:1.5rem' },
         h('h2', { class: 'block-title', style: 'margin-bottom:.75rem' }, '쓸 수 있는 모델', h('small', null, '요금은 100만 토큰당 달러, 공개 요금표 기준')),
         h('table', { class: 'table' },

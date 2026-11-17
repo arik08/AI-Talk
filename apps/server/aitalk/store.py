@@ -1,114 +1,179 @@
-"""파일(JSON) 저장. 페르소나 보관함과 토론 기록."""
+"""저장소. 페르소나 보관함과 토론 기록을 SQLite 파일 하나(data/aitalk.db)에 둔다.
+
+예전 버전이 남긴 JSON 파일(data/personas.json, data/debates/*.json)이 있으면 처음 한 번 옮겨 온다.
+"""
 from __future__ import annotations
 
+import datetime as dt
 import json
-import re
+import sqlite3
+import threading
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Optional
 
 from .config import DATA, PRESETS
 
-PERSONAS = DATA / "personas.json"
-DEBATES = DATA / "debates"
+DB: Path = DATA / "aitalk.db"
+_lock = threading.Lock()
+_ready_for: Optional[Path] = None
 
-
-def _read(path: Path, default):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return default
-
-
-def _write(path: Path, data) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(path)
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS personas (
+    id      TEXT PRIMARY KEY,
+    name    TEXT NOT NULL,
+    data    TEXT NOT NULL,          -- 인물 전체(JSON)
+    sort    INTEGER NOT NULL,       -- 큰 값이 목록의 앞
+    updated TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS debates (
+    id           TEXT PRIMARY KEY,
+    created      TEXT NOT NULL,
+    topic        TEXT NOT NULL,
+    state        TEXT NOT NULL,
+    turns        INTEGER NOT NULL DEFAULT 0,
+    seconds      INTEGER NOT NULL DEFAULT 0,
+    provider     TEXT NOT NULL DEFAULT '',
+    cost         REAL NOT NULL DEFAULT 0,
+    participants TEXT NOT NULL,     -- 목록 화면용 요약(JSON)
+    record       TEXT NOT NULL      -- 기록 전체(JSON): 설정, 발언, 이벤트, 요약, 회의록
+);
+CREATE INDEX IF NOT EXISTS debates_created ON debates (created DESC);
+"""
 
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
 
 
-# ---- 페르소나 ----
+def _now() -> str:
+    return dt.datetime.now().isoformat(timespec="seconds")
+
+
+def _read_json(path: Path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return default
+
+
+def _connect() -> sqlite3.Connection:
+    global _ready_for
+    DB.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(DB, timeout=10)
+    con.row_factory = sqlite3.Row
+    if _ready_for != DB:
+        with _lock:
+            if _ready_for != DB:
+                con.execute("PRAGMA journal_mode=WAL")
+                con.executescript(SCHEMA)
+                _first_run(con)
+                con.commit()
+                _ready_for = DB
+    return con
+
+
+def _first_run(con: sqlite3.Connection) -> None:
+    """처음 한 번: 예전 JSON 파일을 옮기고, 보관함이 비어 있으면 기본 인물을 넣는다."""
+    if con.execute("SELECT 1 FROM meta WHERE key = 'seeded'").fetchone():
+        return
+    legacy = DB.parent / "personas.json"
+    people = _read_json(legacy, None) if legacy.exists() else None
+    if people is None:
+        people = _read_json(PRESETS / "personas.json", [])
+    for i, p in enumerate(reversed(people)):
+        if isinstance(p, dict) and p.get("name"):
+            p = {**p, "id": p.get("id") or new_id("p")}
+            con.execute("INSERT OR IGNORE INTO personas (id, name, data, sort, updated) VALUES (?, ?, ?, ?, ?)",
+                        (p["id"], p["name"], json.dumps(p, ensure_ascii=False), i, _now()))
+    old_debates = DB.parent / "debates"
+    if old_debates.exists():
+        for path in old_debates.glob("*.json"):
+            rec = _read_json(path, None)
+            if rec and rec.get("id"):
+                _put_debate(con, rec)
+    con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('seeded', ?)", (_now(),))
+
+
+# ---------------------------------------------------------------- 페르소나
 def list_personas() -> list[dict]:
-    if not PERSONAS.exists():
-        _write(PERSONAS, _read(PRESETS / "personas.json", []))  # 처음에는 기본 인물을 넣어 둔다
-    return _read(PERSONAS, [])
+    with closing(_connect()) as con:
+        rows = con.execute("SELECT data FROM personas ORDER BY sort DESC").fetchall()
+    return [json.loads(r["data"]) for r in rows]
 
 
 def save_persona(persona: dict) -> dict:
-    people = list_personas()
     persona = {**persona, "id": persona.get("id") or new_id("p")}
-    for i, p in enumerate(people):
-        if p["id"] == persona["id"]:
-            people[i] = persona
-            break
-    else:
-        people.insert(0, persona)
-    _write(PERSONAS, people)
+    blob = json.dumps(persona, ensure_ascii=False)
+    with closing(_connect()) as con, con:
+        if con.execute("SELECT 1 FROM personas WHERE id = ?", (persona["id"],)).fetchone():
+            con.execute("UPDATE personas SET name = ?, data = ?, updated = ? WHERE id = ?",
+                        (persona["name"], blob, _now(), persona["id"]))
+        else:
+            top = con.execute("SELECT COALESCE(MAX(sort), 0) + 1 FROM personas").fetchone()[0]
+            con.execute("INSERT INTO personas (id, name, data, sort, updated) VALUES (?, ?, ?, ?, ?)",
+                        (persona["id"], persona["name"], blob, top, _now()))
     return persona
 
 
 def delete_persona(persona_id: str) -> None:
-    _write(PERSONAS, [p for p in list_personas() if p["id"] != persona_id])
+    with closing(_connect()) as con, con:
+        con.execute("DELETE FROM personas WHERE id = ?", (persona_id,))
 
 
 def import_personas(items: list[dict]) -> int:
-    people = list_personas()
-    known = {p["id"] for p in people}
     added = 0
-    for item in items:
-        if not isinstance(item, dict) or not item.get("name"):
-            continue
-        if not item.get("id") or item["id"] in known:
-            item = {**item, "id": new_id("p")}
-        people.append(item)
-        known.add(item["id"])
-        added += 1
-    _write(PERSONAS, people)
+    with closing(_connect()) as con, con:
+        known = {r["id"] for r in con.execute("SELECT id FROM personas")}
+        top = con.execute("SELECT COALESCE(MAX(sort), 0) FROM personas").fetchone()[0]
+        for item in items:
+            if not isinstance(item, dict) or not str(item.get("name", "")).strip():
+                continue
+            if not item.get("id") or item["id"] in known:
+                item = {**item, "id": new_id("p")}
+            top += 1
+            con.execute("INSERT INTO personas (id, name, data, sort, updated) VALUES (?, ?, ?, ?, ?)",
+                        (item["id"], item["name"], json.dumps(item, ensure_ascii=False), top, _now()))
+            known.add(item["id"])
+            added += 1
     return added
 
 
-# ---- 토론 기록 ----
-def _debate_path(debate_id: str) -> Optional[Path]:
-    if not re.fullmatch(r"[a-z0-9_]+", debate_id):
-        return None
-    return DEBATES / f"{debate_id}.json"
+# ---------------------------------------------------------------- 토론 기록
+def _put_debate(con: sqlite3.Connection, record: dict) -> None:
+    cfg = record.get("config", {})
+    people = [{"name": p.get("name"), "color": p.get("color"), "avatar": p.get("avatar")}
+              for p in cfg.get("participants", [])]
+    con.execute(
+        "INSERT OR REPLACE INTO debates (id, created, topic, state, turns, seconds, provider, cost, participants, record) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (record["id"], record.get("created") or _now(), cfg.get("topic", ""), record.get("state", ""),
+         int(record.get("turns") or 0), int(record.get("seconds") or 0), record.get("provider", ""),
+         float(record.get("cost") or 0), json.dumps(people, ensure_ascii=False),
+         json.dumps(record, ensure_ascii=False)))
 
 
 def save_debate(record: dict) -> None:
-    path = _debate_path(record["id"])
-    if path:
-        _write(path, record)
+    with closing(_connect()) as con, con:
+        _put_debate(con, record)
 
 
 def load_debate(debate_id: str) -> Optional[dict]:
-    path = _debate_path(debate_id)
-    return _read(path, None) if path else None
+    with closing(_connect()) as con:
+        row = con.execute("SELECT record FROM debates WHERE id = ?", (debate_id,)).fetchone()
+    return json.loads(row["record"]) if row else None
 
 
 def delete_debate(debate_id: str) -> None:
-    path = _debate_path(debate_id)
-    if path and path.exists():
-        path.unlink()
+    with closing(_connect()) as con, con:
+        con.execute("DELETE FROM debates WHERE id = ?", (debate_id,))
 
 
 def list_debates() -> list[dict]:
-    out = []
-    if DEBATES.exists():
-        for path in DEBATES.glob("*.json"):
-            rec = _read(path, None)
-            if not rec:
-                continue
-            cfg = rec.get("config", {})
-            out.append({
-                "id": rec["id"], "topic": cfg.get("topic", ""), "created": rec.get("created", ""),
-                "state": rec.get("state", ""), "turns": rec.get("turns", 0),
-                "seconds": rec.get("seconds", 0), "provider": rec.get("provider", ""),
-                "cost": rec.get("cost", 0),
-                "participants": [{"name": p["name"], "color": p.get("color"), "avatar": p.get("avatar")}
-                                 for p in cfg.get("participants", [])],
-            })
-    return sorted(out, key=lambda r: r["created"], reverse=True)
+    with closing(_connect()) as con:
+        rows = con.execute("SELECT id, created, topic, state, turns, seconds, provider, cost, participants "
+                           "FROM debates ORDER BY created DESC").fetchall()
+    return [{**{k: r[k] for k in ("id", "created", "topic", "state", "turns", "seconds", "provider", "cost")},
+             "participants": json.loads(r["participants"])} for r in rows]

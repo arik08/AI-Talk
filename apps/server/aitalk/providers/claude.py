@@ -32,6 +32,17 @@ LABELS = {
 }
 
 
+def web_tools(model: str, max_uses: int, fetch: bool = False) -> list:
+    """웹 도구 정의. Haiku는 예전 버전의 도구를 쓴다."""
+    old = "haiku" in model
+    tools = [{"type": "web_search_20250305" if old else "web_search_20260209",
+              "name": "web_search", "max_uses": max_uses}]
+    if fetch:
+        tools.insert(0, {"type": "web_fetch_20250910" if old else "web_fetch_20260209",
+                         "name": "web_fetch", "max_uses": max_uses})
+    return tools
+
+
 def _usage(u: Any) -> Usage:
     return Usage(
         input=getattr(u, "input_tokens", 0) or 0,
@@ -57,7 +68,7 @@ def _friendly(exc: Exception) -> ProviderError:
 
 class ClaudeProvider(Provider):
     name = "claude"
-    default_model = "claude-opus-5-5"
+    default_model = "claude-haiku-5-5"   # 시험하는 동안은 싸고 빠른 Haiku를 기본으로 쓴다
     default_effort = "low"
 
     def __init__(self, api_key: str) -> None:
@@ -82,7 +93,7 @@ class ClaudeProvider(Provider):
             ids = [i for i in ids if i in seen] or ids
         except Exception:  # noqa: BLE001 - 목록을 못 받아도 기본 목록으로 진행
             pass
-        order = ["claude-opus-5-5", "claude-fable-5-2", "claude-sonnet-5-5", "claude-haiku-5-5"]
+        order = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2"]
         self._models = [ModelInfo(i, LABELS[i], EFFORTS, "low", price=PRICES[i])
                         for i in order if i in ids]
         return self._models
@@ -99,7 +110,7 @@ class ClaudeProvider(Provider):
             kw["thinking"] = {"type": "adaptive", "display": "summarized"}
         if tools:
             kw["tools"] = tools
-        if self.use_fallbacks:
+        if self.use_fallbacks and "haiku" not in model:   # Haiku에는 서버 쪽 대체 모델이 없다
             kw["betas"] = [FALLBACK_BETA]
             kw["extra_body"] = {"fallbacks": "default"}
         return kw
@@ -142,12 +153,24 @@ class ClaudeProvider(Provider):
             emitted = True
             speech.usage.add(_usage(final.usage))
             speech.model = getattr(final, "model", speech.model) or speech.model
+            found: list[dict] = []
             for block in final.content:
-                if getattr(block, "type", "") == "text":
+                btype = getattr(block, "type", "")
+                if btype == "text":
                     for c in getattr(block, "citations", None) or []:
                         url = getattr(c, "url", "")
                         if url and all(s["url"] != url for s in speech.sources):
                             speech.sources.append({"title": getattr(c, "title", "") or url, "url": url})
+                elif btype == "web_search_tool_result":
+                    items = getattr(block, "content", None)
+                    for item in items if isinstance(items, list) else []:
+                        url = getattr(item, "url", "")
+                        if url:
+                            found.append({"title": getattr(item, "title", "") or url, "url": url})
+            if not speech.sources:   # 인용 표시가 없으면 찾아본 결과의 앞쪽 몇 개를 출처로 보여 준다
+                for item in found[:3]:
+                    if all(s["url"] != item["url"] for s in speech.sources):
+                        speech.sources.append(item)
             if final.stop_reason == "pause_turn":
                 messages = messages + [{"role": "assistant", "content": final.content}]
                 continue
@@ -158,17 +181,34 @@ class ClaudeProvider(Provider):
 
     async def _stream_once(self, on_event: OnEvent, speech: Speech, **params: Any) -> Any:
         tool_json: dict[int, str] = {}
+        hold = bool(params.get("tools"))   # 도구가 있으면 글 블록이 끝날 때까지 붙들어 둔다
+        held = ""
+
+        def flush() -> None:
+            nonlocal held
+            if held:
+                speech.text += held
+                on_event("text", held)
+                held = ""
+
         async with self.client.beta.messages.stream(**self._kwargs(**params)) as stream:
             async for event in stream:
                 kind = event.type
                 if kind == "content_block_start":
-                    if getattr(event.content_block, "type", "") == "server_tool_use":
+                    btype = getattr(event.content_block, "type", "")
+                    if btype == "server_tool_use":
                         tool_json[event.index] = ""
+                        held = ""        # 검색 전에 한 말은 발언이 아니므로 버린다
+                    elif btype == "text":
+                        flush()
                 elif kind == "content_block_delta":
                     dtype = event.delta.type
                     if dtype == "text_delta":
-                        speech.text += event.delta.text
-                        on_event("text", event.delta.text)
+                        if hold:
+                            held += event.delta.text
+                        else:
+                            speech.text += event.delta.text
+                            on_event("text", event.delta.text)
                     elif dtype == "thinking_delta":
                         speech.thinking += event.delta.thinking
                     elif dtype == "input_json_delta" and event.index in tool_json:
@@ -181,6 +221,7 @@ class ClaudeProvider(Provider):
                     query = data.get("query") or data.get("url") or ""
                     if query:
                         on_event("search", query)
+            flush()
             return await stream.get_final_message()
 
     # ---- Provider ----
@@ -205,8 +246,7 @@ class ClaudeProvider(Provider):
         return text.strip(), _usage(msg.usage)
 
     async def research(self, *, prompt: str, model: str, effort: str, on_event: OnEvent) -> Speech:
-        tools = [{"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 4},
-                 {"type": "web_search_20260209", "name": "web_search", "max_uses": 4}]
+        tools = web_tools(model, 4, fetch=True)
         speech = await self._stream(lambda kind, payload: on_event(kind, payload) if kind == "search" else None,
                                     model=model, effort=effort, system=prompts.RESEARCH_SYSTEM,
                                     max_tokens=8000, tools=tools,
@@ -228,10 +268,8 @@ class ClaudeContext(Context):
     def _system(self) -> list:
         return [{"type": "text", "text": self.shared, "cache_control": {"type": "ephemeral"}}]
 
-    def _tools(self) -> Optional[list]:
-        if not self.search:
-            return None
-        return [{"type": "web_search_20260209", "name": "web_search", "max_uses": self.max_searches}]
+    def _tools(self, model: str) -> Optional[list]:
+        return web_tools(model, self.max_searches) if self.search else None
 
     def _messages(self, tail: str) -> list:
         blocks: list[dict] = [{"type": "text", "text": "━━ 토론 기록 ━━"}]
@@ -245,7 +283,7 @@ class ClaudeContext(Context):
         tail = prompts.speaker_tail(speaker, directive, private)
         speech = await self.p._stream(on_event, model=model, effort=effort, system=self._system(),
                                       messages=self._messages(tail), max_tokens=6000,
-                                      tools=self._tools())
+                                      tools=self._tools(model))
         speech.text = clean_utterance(speech.text, speaker)
         self.last_input_tokens = speech.usage.total_input
         return speech
@@ -264,7 +302,7 @@ class ClaudeContext(Context):
                     effort: str) -> tuple[dict, Usage]:
         msg = await self.p._create(model=model, effort=effort, system=self._system(),
                                    messages=self._messages(question), max_tokens=4000,
-                                   tools=self._tools(), schema=schema)
+                                   schema=schema)
         text = next((b.text for b in msg.content if b.type == "text"), "")
         return parse_json(text), _usage(msg.usage)
 

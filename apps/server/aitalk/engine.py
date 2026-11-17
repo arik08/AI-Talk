@@ -8,6 +8,12 @@
   3. 확정: 화면에 나오기 시작한 발언만 문맥에 넣는다. 미리 만들었다가 버린 발언은 들어가지 않는다.
   4. 다음 정하기: 확정되면 연출자가 전원의 발언 의지를 매기고, 규칙을 더해 다음 발언자를 고른다.
      끼어들기로 정해지면 지금 발언을 문장 끝에서 끊는다.
+
+토큰을 미리 써 두지 않는다
+  - 화면에 나오는 발언보다 한 발언만 앞서 만든다.
+  - 그것도 앞 발언이 끝나기 직전에 맞춰 만든다. 최근 호출이 걸린 시간을 재서, 앞 발언의 남은 재생 시간이
+    그만큼 남았을 때 시작한다. 연출자는 앞 발언이 30%쯤 나왔을 때 부른다(끼어들 자리를 남기려고).
+  - 보는 사람이 없으면(창을 닫으면) 잠시 뒤 스스로 멈추고, 다시 열면 이어 간다.
 """
 from __future__ import annotations
 
@@ -29,6 +35,8 @@ GAP_SPEED = {"slow": 1.25, "normal": 1.0, "fast": 0.6, "instant": 0.0}
 SPEECH_CPS = 5.5                                         # 토론 시계용: 사람이 말하는 속도
 GAPS = {"interject": 0.15, "rebut": 0.6, "ask": 0.9, "add": 1.1, "agree": 1.0, "shift": 1.6,
         "moderate": 1.4, "statement": 1.2, "open": 0.6, "closing": 1.3, "wrap": 1.5, "answer": 0.8}
+AWAY_SECONDS = 12      # 보는 사람이 없어진 뒤 이만큼 지나면 토론을 멈춘다
+REACT_AT = 0.3         # 앞 발언이 이만큼 화면에 나왔을 때 연출자를 부른다
 PHASE_LABEL = {"prepare": "준비", "opening": "개회", "statements": "모두발언", "free": "자유토론",
                "closing": "마무리 발언", "wrap": "진행자 정리", "ended": "끝"}
 
@@ -101,6 +109,11 @@ class Debate:
         self.director_failed = False
         self.closing = False
         self._moods: dict[str, dict] = {}
+        self._lat = {"speech": 3.0, "director": 2.5}   # 최근 호출이 걸린 시간(초). 다음 발언을 만들 시점을 정한다
+        self._shown = asyncio.Event()                  # 지금 화면에 나오고 있는 발언이 없으면 켜져 있다
+        self._shown.set()
+        self.auto_paused = False
+        self._away_task: Optional[asyncio.Task] = None
 
         self.ctx = None
         self.briefing = ""
@@ -144,6 +157,7 @@ class Debate:
             self._gate_open.clear()
             self.emit("paused")
         elif action == "resume" and self.state in ("paused", "error"):
+            self.auto_paused = False
             if self._paused_at is not None:
                 self._paused_total += time.monotonic() - self._paused_at
                 self._paused_at = None
@@ -164,6 +178,25 @@ class Debate:
             self.emit("notice", kind=action, text=str(value).strip()[:500])
         elif action == "abort" and self.task and not self.task.done():
             self.task.cancel()
+
+    def viewer_joined(self) -> None:
+        if self._away_task and not self._away_task.done():
+            self._away_task.cancel()
+        if self.auto_paused and self.state == "paused":
+            self.auto_paused = False
+            self.control("resume")
+
+    def viewer_left(self) -> None:
+        if self.subs or self.state != "running":
+            return
+        self._away_task = asyncio.create_task(self._away())
+
+    async def _away(self) -> None:
+        await asyncio.sleep(AWAY_SECONDS)
+        if not self.subs and self.state == "running":
+            self.auto_paused = True
+            self.control("pause")
+            self.emit("notice", kind="info", text="보는 사람이 없어 토론을 멈췄습니다. 다시 열면 이어 갑니다.")
 
     async def _gate(self) -> None:
         if not self._gate_open.is_set():
@@ -228,7 +261,7 @@ class Debate:
                 self.emit("briefing", text=self.briefing)
         shared = prompts.shared_context(cfg, self.briefing)
         self.ctx = self.provider.open_context(
-            shared, search=cfg.get("search") == "all",
+            shared, search=cfg.get("search") in ("auto", "all"),
             max_searches=int(cfg.get("max_searches", 2)),
             compact_threshold=int(cfg.get("compact_threshold", 150_000)))
 
@@ -264,7 +297,9 @@ class Debate:
         if self.mod:
             self.script.append(Turn(self.mod, "open",
                 f"토론을 여세요. 주제를 한두 문장으로 소개하고, 참가자({names})를 각각 한마디로 소개한 뒤 "
-                "첫 발언을 청하세요. 4~6문장.", "opening", scripted=True))
+                + (f"모두발언을 {self.people[0]['name']} 님부터 이 순서대로 청하세요. " if self.cfg.get("mode", "mixed") != "free"
+                   else "누구든 먼저 말해 달라고 청하세요. ")
+                + "4~6문장.", "opening", scripted=True))
         if self.cfg.get("mode", "mixed") != "free":
             for p in self.people:
                 self.script.append(Turn(p, "statement",
@@ -275,7 +310,8 @@ class Debate:
         self.phase_target = "closing"
         if self.mod:
             self.script.append(Turn(self.mod, "moderate",
-                "토론을 마무리할 시간입니다. 시간이 다 되었음을 알리고, 참가자들에게 마지막 발언을 한 명씩 청하세요. 2~3문장.",
+                "토론을 마무리할 시간입니다. 시간이 다 되었음을 알리고, 마지막 발언을 "
+                + ", ".join(p["name"] for p in self.people) + " 순서로 청하세요. 2~3문장.",
                 "closing", scripted=True))
         for p in self.people:
             self.script.append(Turn(p, "closing",
@@ -382,13 +418,16 @@ class Debate:
             gen.changed.set()
 
         async def work() -> None:
+            started = time.monotonic()
             try:
+                await self._gate()
                 private = speaker.get("hidden", "") if self.cfg.get("hidden_agenda", True) else ""
                 speech = await self.ctx.speak(
                     speaker=speaker["name"], directive=turn.directive, private=private,
                     model=self._model(speaker), effort=self._effort(speaker), on_event=on_event)
                 if not speech.text.strip():
                     raise ProviderError("모델이 빈 발언을 돌려주었습니다.")
+                self._note_latency("speech", time.monotonic() - started)
                 # 화면에 이미 나간 글자와 자리가 어긋나지 않게 맞춘다
                 raw = gen.text
                 lead = len(raw) - len(raw.lstrip())
@@ -454,6 +493,7 @@ class Debate:
         self.skip = False
         self._cut = None
         self._pos = 0
+        self._shown.clear()
         self._plan_task = asyncio.create_task(self._after_gen(gen))
         sent_searches = 0
         cut = False
@@ -490,6 +530,7 @@ class Debate:
                 await asyncio.wait_for(gen.changed.wait(), timeout=0.25)
             except asyncio.TimeoutError:
                 pass
+        self._shown.set()
         if gen.error:
             self.emit("speech_end", id=sid, failed=True, text="", cut=False)
             self.turn_no -= 1
@@ -536,26 +577,68 @@ class Debate:
         self._bg.add(task)
         task.add_done_callback(self._bg.discard)
 
+    def _note_latency(self, key: str, seconds: float) -> None:
+        self._lat[key] = self._lat[key] * 0.6 + seconds * 0.4
+
+    def _remaining(self, prev: Gen) -> float:
+        """앞 발언이 화면에 다 나오기까지 남은 시간(초)의 어림."""
+        if self._shown.is_set() or self.speed == "instant" or self.skip:
+            return 0.0
+        limit = self._cut if self._cut is not None else len(prev.text)
+        return max(limit - self._pos, 0) / CPS.get(self.speed, 14.0) * 1.3
+
+    async def _hold_until(self, prev: Gen, *, progress: Optional[float] = None,
+                          lead: Optional[float] = None) -> None:
+        """앞 발언이 충분히 나올 때까지 다음 호출을 미룬다. 토큰을 너무 앞서 쓰지 않기 위해서다."""
+        while True:
+            await self._gate()
+            if self._shown.is_set() or self.speed == "instant" or self.skip:
+                return
+            if progress is not None and self._pos >= progress * len(prev.text):
+                return
+            if lead is not None and self._remaining(prev) <= lead:
+                return
+            await asyncio.sleep(0.1)
+
+    def _lead(self) -> float:
+        """다음 발언을 만들기 시작할 시점: 앞 발언의 남은 시간이 이만큼일 때."""
+        return self._lat["speech"] * 1.25 + 0.8
+
+    async def _react(self, prev: Gen) -> None:
+        await self._hold_until(prev, progress=REACT_AT)
+        await self._direct(react_only=True)
+
     async def _plan(self, prev: Gen) -> Optional[Gen]:
         chars = len(prev.text)
-        if self.script:
-            self._spawn(self._direct(react_only=True))
-            return self._generate(self.script.popleft())
-        if self.closing:
+        await self._gate()
+        if self.closing and not self.script:
             return None
-        if self._should_close(chars):
-            self._enter_closing()
-            self._spawn(self._direct(react_only=True))
-            return self._generate(self.script.popleft())
-        milestone = self._milestone(chars)
-        if self.cfg.get("mode") == "sequential":
-            self._spawn(self._direct(react_only=True))
-            return self._generate(milestone or self._sequential_turn())
+        free = (not self.script and not self._should_close(chars)
+                and self.cfg.get("mode") != "sequential")
+        if not free:   # 다음 발언자가 정해져 있다: 연출자는 감정만 정하고, 발언은 때맞춰 만든다
+            self._spawn(self._react(prev))
+            await self._hold_until(prev, lead=self._lead())
+            return self._generate(self._next_scripted(chars))
+        await self._hold_until(prev, progress=REACT_AT)
         verdict = await self._direct()
-        turn = milestone or self._choose(verdict, prev)
+        if self._should_close(chars):   # 기다리는 사이에 "마무리"가 눌렸을 수 있다
+            await self._hold_until(prev, lead=self._lead())
+            return self._generate(self._next_scripted(chars))
+        turn = self._milestone(chars) or self._choose(verdict, prev)
         if turn.interject:
             turn.interject = self._arm_cut(prev)
+            if turn.interject:
+                return self._generate(turn)   # 곧 말을 끊으므로 바로 만든다
+        await self._hold_until(prev, lead=self._lead())
         return self._generate(turn)
+
+    def _next_scripted(self, chars: int) -> Turn:
+        if self.script:
+            return self.script.popleft()
+        if self._should_close(chars):
+            self._enter_closing()
+            return self.script.popleft()
+        return self._milestone(chars) or self._sequential_turn()
 
     def _milestone(self, chars: int) -> Optional[Turn]:
         if not self.mod:
@@ -582,9 +665,11 @@ class Debate:
         names = [p["name"] for p in self.people]
         last = self.ctx.entries[-1][0] if getattr(self.ctx, "entries", None) else ""
         try:
+            started = time.monotonic()
             data, usage = await self.ctx.judge(
                 question=prompts.director_question(names, last), schema=prompts.director_schema(),
                 model=self.cfg["model"], effort=self.cfg["effort"])
+            self._note_latency("director", time.monotonic() - started)
             self._account("director", usage, self.cfg["model"])
             verdict = self._normalize(data)
         except asyncio.CancelledError:

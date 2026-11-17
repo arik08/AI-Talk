@@ -1,5 +1,5 @@
 import {
-  ChevronRight, FileText, Globe, Library, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Upload,
+  ChevronRight, Drama, FileText, Globe, Library, RotateCcw, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Upload,
 } from 'lucide';
 import { api } from '../api';
 import { AVATAR_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
@@ -12,6 +12,7 @@ interface Material { name: string; text: string; chars: number; tokens: number }
 
 const draft = {
   topic: '',
+  concept: '',
   materials: [] as Material[],
   urls: [] as string[],
   count: 4,
@@ -26,7 +27,7 @@ const draft = {
   speed: 'normal',
   interjection: true,
   gapScale: 1,
-  search: 'off',
+  search: 'auto',
   maxSearches: 2,
   model: '',
   effort: '',
@@ -36,10 +37,43 @@ const draft = {
   hiddenAgenda: null as boolean | null,
 };
 
+/* 진행 설정은 이 브라우저에 기억해 두고 다음에 그대로 쓴다. 주제, 자료, 참가자는 기억하지 않는다. */
+const SETTING_KEYS = ['count', 'policy', 'avatarSet', 'moderator', 'mode', 'turnsOn', 'maxTurns', 'minutesOn', 'maxMinutes',
+  'length', 'speed', 'interjection', 'gapScale', 'search', 'maxSearches', 'model', 'effort', 'perSpeaker', 'badge', 'summary',
+  'hiddenAgenda'] as const;
+const STORE_KEY = 'aitalk.settings.v1';
+const pick = (): Record<string, unknown> => Object.fromEntries(SETTING_KEYS.map((k) => [k, (draft as any)[k]]));
+const DEFAULTS = pick();
+
+function persist(): void {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(pick())); } catch { /* 저장이 막혀 있어도 화면은 그대로 쓴다 */ }
+}
+
+function restore(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null');
+    if (!saved || typeof saved !== 'object') return;
+    for (const k of SETTING_KEYS) {
+      const value = saved[k];
+      const base = DEFAULTS[k];
+      if (value === undefined) continue;
+      if (base === null ? (value === null || typeof value === 'boolean') : typeof value === typeof base) (draft as any)[k] = value;
+    }
+    if (!['auto', 'off'].includes(draft.search)) draft.search = 'auto';
+    draft.count = Math.max(2, Math.min(10, Math.round(draft.count) || 4));
+  } catch { /* 깨진 값은 무시한다 */ }
+}
+restore();
+
 const EXAMPLES = [
   '주 4일제를 법으로 정해야 하는가',
   'AI가 만든 창작물에 저작권을 인정해야 하는가',
   '제철소의 수소환원제철 전환, 지금 속도가 맞는가',
+];
+const CONCEPTS = [
+  'TV 생방송 토론. 시청자를 의식해 날카롭고 간결하게 말한다',
+  '사내 임원 회의. 서로 존중하지만 부서의 이해관계가 걸려 있다',
+  '친한 동료들의 편한 점심 수다. 농담을 섞고 격식을 차리지 않는다',
 ];
 const MOOD_CYCLE: Mood[] = ['agree', 'heated', 'curious', 'amused', 'skeptical', 'surprised', 'thinking', 'calm'];
 
@@ -48,7 +82,7 @@ function seg<T extends string>(options: [T, string][], get: () => T, set: (v: T)
   const paint = () => {
     clear(el);
     for (const [value, label] of options) {
-      el.append(h('button', { type: 'button', class: get() === value ? 'is-on' : '', onclick: () => { set(value); paint(); } }, label));
+      el.append(h('button', { type: 'button', class: get() === value ? 'is-on' : '', onclick: () => { set(value); persist(); paint(); } }, label));
     }
   };
   paint();
@@ -56,7 +90,7 @@ function seg<T extends string>(options: [T, string][], get: () => T, set: (v: T)
 }
 
 function toggle(label: string, get: () => boolean, set: (v: boolean) => void): HTMLElement {
-  const input = h('input', { type: 'checkbox', checked: get(), onchange: () => set(input.checked) });
+  const input = h('input', { type: 'checkbox', checked: get(), onchange: () => { set(input.checked); persist(); } });
   return h('label', { class: 'switch' }, input, h('i'), h('span', null, label));
 }
 
@@ -66,7 +100,7 @@ function field(label: string, control: HTMLElement, note = ''): HTMLElement {
 
 export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   const status = ctx.status;
-  if (status && !draft.model) {
+  if (status && !status.models.some((m) => m.id === draft.model)) {   // 기억해 둔 모델이 지금 AI에 없으면 기본값으로
     draft.model = status.defaults.model;
     draft.effort = status.defaults.effort;
   }
@@ -84,6 +118,11 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     oninput: () => { draft.topic = topic.value; paintStart(); },
   });
   topic.value = draft.topic;
+  const concept = h('textarea', {
+    class: 'concept-input', rows: 2, placeholder: '예) 심야 라디오 토론. 진행자는 느긋하고, 참가자들은 서로를 잘 아는 오랜 논객들이다.',
+    oninput: () => { draft.concept = concept.value; },
+  });
+  concept.value = draft.concept;
   put(page,
     h('div', { class: 'hero' }, h('h1', null, '무엇을 두고 토론할까요?'),
       h('p', null, '주제를 던지면 AI 참가자들이 실제 토론처럼 말을 주고받습니다.')),
@@ -92,6 +131,11 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     h('div', { class: 'panel frame topic-box' }, topic,
       h('div', { class: 'topic-foot' }, h('span', { class: 'muted small' }, '예시'),
         EXAMPLES.map((text) => h('button', { type: 'button', class: 'chip', onclick: () => { topic.value = text; draft.topic = text; paintStart(); topic.focus(); } }, text)))),
+    h('div', { class: 'panel concept-box' },
+      h('div', { class: 'concept-label' }, icon(Drama, 18), '컨셉과 분위기', h('small', null, '선택. 어떤 자리인지, 어떤 분위기인지. 참가자 모두에게 똑같이 적용됩니다')),
+      concept,
+      h('div', { class: 'topic-foot' }, h('span', { class: 'muted small' }, '예시'),
+        CONCEPTS.map((text) => h('button', { type: 'button', class: 'chip', onclick: () => { concept.value = text; draft.concept = text; concept.focus(); } }, text)))),
   );
 
   /* ---- 자료 ---- */
@@ -140,7 +184,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   const countLabel = h('b', null, '');
   const minus = h('button', { type: 'button', 'aria-label': '한 명 줄이기', onclick: () => setCount(draft.count - 1) }, icon(Minus, 16));
   const plus = h('button', { type: 'button', 'aria-label': '한 명 늘리기', onclick: () => setCount(draft.count + 1) }, icon(Plus, 16));
-  const policy = h('select', { class: 'select', style: 'width:auto', onchange: () => { draft.policy = policy.value; } },
+  const policy = h('select', { class: 'select', style: 'width:auto', onchange: () => { draft.policy = policy.value; persist(); } },
     ([['auto', '알아서 구성'], ['balanced', '찬반 균형'], ['stakeholders', '여러 이해관계자'], ['experts', '전문가 패널']] as const)
       .map(([v, l]) => h('option', { value: v, selected: draft.policy === v }, l)));
   const genBtn = h('button', { type: 'button', class: 'btn', onclick: () => generateAll() }, icon(Sparkles, 18), '자동 생성');
@@ -187,7 +231,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     paintCast();
     try {
       const { personas } = await api.cast({
-        topic: draft.topic, count: draft.count, policy: draft.policy, fixed: kept,
+        topic: draft.topic, concept: draft.concept, count: draft.count, policy: draft.policy, fixed: kept,
         materials: draft.materials.map((m) => m.text).join('\n\n').slice(0, 6000),
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
@@ -217,7 +261,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     paintCast();
     try {   // 다른 참가자를 알려 주어 겹치지 않는 인물을 받는다
       const { personas } = await api.cast({
-        topic: draft.topic, count: others.length + 1, policy: draft.policy, fixed: others, materials: '',
+        topic: draft.topic, concept: draft.concept, count: others.length + 1, policy: draft.policy, fixed: others, materials: '',
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
       const fresh = personas[others.length];
@@ -327,8 +371,31 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
 
   /* ---- 진행 설정 ---- */
   const models = status?.models ?? [];
-  const turns = h('input', { class: 'input', type: 'number', min: 6, max: 200, value: draft.maxTurns, onchange: () => { draft.maxTurns = Math.max(6, Math.min(200, Number(turns.value) || 30)); turns.value = String(draft.maxTurns); paintStart(); } });
-  const minutes = h('input', { class: 'input', type: 'number', min: 2, max: 60, value: draft.maxMinutes, onchange: () => { draft.maxMinutes = Math.max(2, Math.min(60, Number(minutes.value) || 10)); minutes.value = String(draft.maxMinutes); paintStart(); } });
+  /** 슬라이더와 숫자 칸이 같은 값을 가리킨다. 슬라이더로 대강 잡고 숫자로 정확히 적는다. */
+  function limitRow(opts: { min: number; max: number; sliderMax: number; unit: string; get: () => number; set: (v: number) => void;
+    on: () => boolean; setOn: (v: boolean) => void }): HTMLElement {
+    const clamp = (v: number) => Math.max(opts.min, Math.min(opts.max, Math.round(v) || opts.min));
+    const range = h('input', { class: 'range', type: 'range', min: opts.min, max: opts.sliderMax, step: 1, 'aria-label': `${opts.unit} 슬라이더` });
+    const num = h('input', { class: 'input', type: 'number', min: opts.min, max: opts.max, 'aria-label': `${opts.unit} 입력` });
+    const row = h('div', { class: 'slider-row' });
+    const sync = () => {
+      const v = opts.get();
+      range.value = String(Math.min(v, opts.sliderMax));
+      num.value = String(v);
+      range.style.setProperty('--p', `${((Math.min(v, opts.sliderMax) - opts.min) / (opts.sliderMax - opts.min)) * 100}%`);
+      row.classList.toggle('is-off', !opts.on());
+      paintStart();
+    };
+    range.addEventListener('input', () => { opts.set(clamp(Number(range.value))); sync(); });
+    num.addEventListener('change', () => { opts.set(clamp(Number(num.value))); sync(); });
+    row.append(toggle('', opts.on, (v) => { opts.setOn(v); sync(); }), range, num, h('span', { class: 'muted' }, opts.unit));
+    queueMicrotask(sync);
+    return row;
+  }
+  const turnsRow = limitRow({ min: 6, max: 200, sliderMax: 100, unit: '턴', get: () => draft.maxTurns, set: (v) => { draft.maxTurns = v; },
+    on: () => draft.turnsOn, setOn: (v) => { draft.turnsOn = v; } });
+  const minutesRow = limitRow({ min: 2, max: 120, sliderMax: 60, unit: '분', get: () => draft.maxMinutes, set: (v) => { draft.maxMinutes = v; },
+    on: () => draft.minutesOn, setOn: (v) => { draft.minutesOn = v; } });
   const effortSel = h('select', { class: 'select', onchange: () => { draft.effort = effortSel.value; paintStart(); } });
   const paintEfforts = () => {
     const m = models.find((x) => x.id === draft.model) ?? models[0];
@@ -339,21 +406,29 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   const modelSel = h('select', { class: 'select', onchange: () => { draft.model = modelSel.value; paintEfforts(); paintStart(); } },
     models.map((m) => h('option', { value: m.id, selected: draft.model === m.id }, m.price ? `${m.label} · 입력 $${m.price.in} / 출력 $${m.price.out}` : m.label)));
   paintEfforts();
-  const searches = h('input', { class: 'input', type: 'number', min: 1, max: 5, value: draft.maxSearches, onchange: () => { draft.maxSearches = Math.max(1, Math.min(5, Number(searches.value) || 2)); } });
-  const gap = h('input', { type: 'range', min: 0, max: 2, step: 0.25, value: draft.gapScale, style: 'width:100%;accent-color:#E8C170', oninput: () => { draft.gapScale = Number(gap.value); gapNote.textContent = draft.gapScale === 0 ? '뜸 없음' : `${draft.gapScale}배`; } });
-  const gapNote = h('span', { class: 'muted small' }, `${draft.gapScale}배`);
+  const searches = h('input', { class: 'input', type: 'number', min: 1, max: 5, value: draft.maxSearches, onchange: () => { draft.maxSearches = Math.max(1, Math.min(5, Number(searches.value) || 2)); persist(); } });
+  const gap = h('input', { type: 'range', min: 0, max: 2, step: 0.25, value: draft.gapScale, class: 'range', oninput: () => { draft.gapScale = Number(gap.value); gap.style.setProperty('--p', `${draft.gapScale * 50}%`); gapNote.textContent = draft.gapScale === 0 ? '뜸 없음' : `${draft.gapScale}배`; persist(); } });
+  gap.style.setProperty('--p', `${draft.gapScale * 50}%`);
+  const gapNote = h('span', { class: 'muted small', style: 'display:block;margin-top:.5rem' }, draft.gapScale === 0 ? '뜸 없음' : `${draft.gapScale}배`);
   const hidden = draft.hiddenAgenda ?? status?.defaults.hidden_agenda ?? true;
 
   page.append(h('section', { class: 'block' },
-    h('h2', { class: 'block-title' }, '진행 설정', h('small', null, '그대로 두고 시작해도 됩니다')),
+    h('h2', { class: 'block-title' }, '진행 설정', h('small', null, '마지막에 쓴 설정을 기억합니다'),
+      h('button', { type: 'button', class: 'btn', style: 'order:1;font-family:var(--font-body)', tip: '모든 설정을 처음 값으로 되돌립니다', onclick: () => {
+        Object.assign(draft, structuredClone(DEFAULTS));
+        try { localStorage.removeItem(STORE_KEY); } catch { /* 무시 */ }
+        toast('설정을 처음 상태로 되돌렸습니다.');
+        ctx.reload();
+      } }, icon(RotateCcw, 16), '초기 설정으로')),
     h('div', { class: 'settings-grid' },
       field('진행 방식', seg([['mixed', '혼합'], ['free', '자유'], ['sequential', '순차']], () => draft.mode, (v) => { draft.mode = v; }),
         '혼합: 모두발언은 차례대로, 그 뒤는 말하고 싶은 사람이'),
-      field('턴 수 제한', h('div', { class: 'inline-num' }, toggle('', () => draft.turnsOn, (v) => { draft.turnsOn = v; paintStart(); }), turns, h('span', { class: 'muted' }, '턴'))),
-      field('시간 제한', h('div', { class: 'inline-num' }, toggle('', () => draft.minutesOn, (v) => { draft.minutesOn = v; paintStart(); }), minutes, h('span', { class: 'muted' }, '분')),
-        '실제로 말했다면 걸렸을 시간으로 잽니다'),
+      field('턴 수 제한', turnsRow, '슬라이더는 100턴까지, 숫자로는 200턴까지 적을 수 있습니다'),
+      field('시간 제한', minutesRow, '실제로 말했다면 걸렸을 시간으로 잽니다. 둘 중 먼저 닿는 쪽에서 마무리합니다'),
       field('발언 길이', seg([['short', '짧게'], ['normal', '보통'], ['long', '길게']], () => draft.length, (v) => { draft.length = v; })),
-      field('출력 속도', seg([['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']], () => draft.speed, (v) => { draft.speed = v; }))),
+      field('출력 속도', seg([['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']], () => draft.speed, (v) => { draft.speed = v; })),
+      field('웹 검색', seg([['auto', '자동'], ['off', '끔']], () => draft.search, (v) => { draft.search = v; }),
+        '자동: 참가자가 필요하다고 판단할 때만 스스로 검색합니다. 검색한 만큼 요금이 따로 듭니다')),
     h('details', { class: 'adv' },
       h('summary', null, icon(ChevronRight, 16), '고급 설정'),
       h('div', { class: 'settings-grid' },
@@ -363,8 +438,6 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
           '성능이 다른 AI를 비교할 때 씁니다. 캐시 할인이 줄어듭니다'),
         field('끼어들기', toggle('말을 끊고 끼어들 수 있음', () => draft.interjection, (v) => { draft.interjection = v; })),
         field('발언 사이 뜸', h('div', null, gap, gapNote)),
-        field('웹 검색', seg([['off', '끔'], ['moderator', '진행자만'], ['all', '전원']], () => draft.search, (v) => { draft.search = v; }),
-          '전원: 참가자가 말하기 전에 스스로 검색합니다. 검색 요금이 따로 듭니다'),
         field('발언당 검색 횟수', h('div', { class: 'inline-num' }, searches, h('span', { class: 'muted' }, '회'))),
         field('모델 배지', seg([['on', '보이기'], ['off', '숨기기'], ['blind', '블라인드']], () => draft.badge, (v) => { draft.badge = v; }),
           '블라인드: 토론이 끝난 뒤에 모델을 공개합니다'),
@@ -380,6 +453,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   page.append(h('div', { class: 'start-bar' }, startNote, startBtn));
 
   function paintStart(): void {
+    persist();
     const limits = [draft.turnsOn ? `${draft.maxTurns}턴` : '', draft.minutesOn ? `${draft.maxMinutes}분` : ''].filter(Boolean).join(' 또는 ');
     const model = models.find((m) => m.id === draft.model)?.label ?? '';
     startNote.textContent = [`참가자 ${draft.count}명${draft.moderator ? ' + 진행자' : ''}`, limits || '제한 없음', model ? `${model} · ${draft.effort}` : '']
@@ -403,7 +477,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     startBtn.append(icon(LoaderCircle, 20, 'spin'), '무대를 준비하는 중');
     try {
       const { id } = await api.startDebate({
-        topic: draft.topic, materials: draft.materials.map((m) => ({ name: m.name, text: m.text })), urls: draft.urls,
+        topic: draft.topic, concept: draft.concept, materials: draft.materials.map((m) => ({ name: m.name, text: m.text })), urls: draft.urls,
         participants: draft.cast.map((p, i) => {
           const { fromLibrary: _f, ...rest } = p!;
           return { ...rest, id: `s${i + 1}`, model: draft.perSpeaker ? rest.model : undefined, effort: draft.perSpeaker ? rest.effort : undefined };

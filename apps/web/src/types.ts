@@ -37,6 +37,7 @@ export interface Status {
   message: string;
   models: ModelInfo[];
   defaults: { model: string; effort: string; compact_threshold: number; hidden_agenda: boolean };
+  network?: { shared: boolean; port: number; addresses: string[]; code: boolean };
 }
 
 export interface DebateSummary {
@@ -69,7 +70,10 @@ export interface DebateRecord {
   events: DebateEvent[];
   speeches: any[];
   summary: any;
+  minutes?: any;
   briefing: string;
+  turns?: number;
+  seconds?: number;
 }
 
 export const MOOD_LABEL: Record<Mood, string> = {

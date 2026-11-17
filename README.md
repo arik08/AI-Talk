@@ -21,6 +21,18 @@ Python 3.13과 Node.js가 필요합니다.
 
 `run.bat`을 실행하면 브라우저에서 http://127.0.0.1:8765 가 열립니다.
 
+## 같은 망의 다른 PC에서 접속하게 하기
+
+`.env`에 아래 두 줄을 넣고 `run.bat`으로 다시 켭니다. 실행 창과 설정 화면에 접속 주소(`http://이PC의IP:8765`)가 나옵니다.
+
+```
+AITALK_HOST=0.0.0.0
+AITALK_ACCESS_CODE=원하는코드
+```
+
+- 처음 켤 때 Windows 방화벽이 물으면 "액세스 허용"을 눌러야 합니다.
+- `AITALK_ACCESS_CODE`를 넣으면 다른 PC에서 들어올 때 그 코드를 묻습니다. 넣지 않으면 같은 망의 누구나 들어와 내 AI 키로 토론을 돌리고 기록을 지울 수 있습니다.
+
 ## 회사에서 P-GPT를 처음 쓸 때
 
 P-GPT 쪽은 집에서 실행해 보지 못했습니다. 먼저 점검 스크립트를 돌려 주세요.
@@ -46,5 +58,5 @@ python -m pytest apps/server/tests -q
 | `apps/server` | FastAPI 서버, 토론 엔진, 프로바이더(Claude, P-GPT, mock) |
 | `apps/web` | 화면 (Vite + TypeScript, Lucide) |
 | `presets` | 기본 인물 |
-| `data` | 페르소나 보관함과 토론 기록 (git 제외) |
+| `data` | 페르소나 보관함과 토론 기록이 든 `aitalk.db` (git 제외) |
 | `scripts` | P-GPT 점검 스크립트 |

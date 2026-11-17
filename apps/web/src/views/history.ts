@@ -1,27 +1,12 @@
-import { Download, Hourglass, ListOrdered, Play } from 'lucide';
+import { Copy, Download, Hourglass, ListOrdered, Play } from 'lucide';
 import { api } from '../api';
 import { createAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
-import type { DebateRecord, DebateSummary } from '../types';
+import { copyText, recordToMarkdown } from '../export';
+import type { DebateSummary } from '../types';
 import { clear, deleteButton, fmtTime, h, icon, safeColor, toast } from '../ui/dom';
 
 const STATE: Record<string, string> = { ended: '끝남', running: '진행 중', paused: '멈춤', error: '오류로 멈춤', aborted: '중단됨', failed: '실패' };
-
-function toMarkdown(rec: DebateRecord): string {
-  const lines = [`# ${rec.config.topic}`, '', `- 날짜: ${rec.created.replace('T', ' ')}`,
-    `- 참가자: ${rec.config.participants.map((p: any) => `${p.name}(${p.title})`).join(', ')}`, ''];
-  for (const s of rec.speeches ?? []) lines.push(`**${s.name}**: ${s.text}`, '');
-  if (rec.summary) {
-    lines.push('## 요약', '', rec.summary.headline, '');
-    for (const c of rec.summary.consensus ?? []) lines.push(`- 동의: ${c}`);
-    for (const it of rec.summary.issues ?? []) {
-      lines.push('', `### ${it.issue}`);
-      for (const pos of it.positions ?? []) lines.push(`- ${pos.name}: ${pos.position}`);
-    }
-    lines.push('', `> ${rec.summary.takeaway}`);
-  }
-  return lines.join('\n');
-}
 
 export function mountHistory(root: HTMLElement, ctx: AppContext): () => void {
   const list = h('div', { class: 'hist' });
@@ -32,10 +17,18 @@ export function mountHistory(root: HTMLElement, ctx: AppContext): () => void {
   async function exportMd(id: string): Promise<void> {
     try {
       const rec = await api.debate(id);
-      const blob = new Blob([toMarkdown(rec)], { type: 'text/markdown' });
+      const blob = new Blob([recordToMarkdown(rec)], { type: 'text/markdown' });
       const a = h('a', { href: URL.createObjectURL(blob), download: `${rec.config.topic.slice(0, 30).replace(/[\\/:*?"<>|]/g, '')}.md` });
       a.click();
       URL.revokeObjectURL(a.href);
+    } catch (err) { toast((err as Error).message, 'error'); }
+  }
+
+  async function copyMd(id: string): Promise<void> {
+    try {
+      const rec = await api.debate(id);
+      const ok = await copyText(recordToMarkdown(rec));
+      toast(ok ? (rec.minutes ? '대화 내용과 회의록을 복사했습니다.' : '회의록이 아직 없어 대화 내용만 복사했습니다.') : '복사하지 못했습니다.', ok ? 'info' : 'error');
     } catch (err) { toast((err as Error).message, 'error'); }
   }
 
@@ -64,6 +57,7 @@ export function mountHistory(root: HTMLElement, ctx: AppContext): () => void {
             d.cost ? h('span', null, `약 $${d.cost.toFixed(3)}`) : null)),
         avs,
         h('div', { class: 'row', style: 'gap:.125rem', onclick: (e: MouseEvent) => e.stopPropagation() },
+          h('button', { type: 'button', class: 'btn btn--icon', tip: '대화 + 회의록 복사', 'aria-label': '대화와 회의록 복사', onclick: () => copyMd(d.id) }, icon(Copy, 18)),
           h('button', { type: 'button', class: 'btn btn--icon', tip: '마크다운으로 내보내기', 'aria-label': '마크다운으로 내보내기', onclick: () => exportMd(d.id) }, icon(Download, 18)),
           deleteButton(async () => {
             try { await api.deleteDebate(d.id); load(); } catch (err) { toast((err as Error).message, 'error'); }

@@ -42,7 +42,14 @@ def persona_block(p: dict) -> str:
 
 
 def shared_context(cfg: dict, briefing: str) -> str:
-    parts = [RULES, "", "# 토론 주제", cfg["topic"].strip(), "", "# 형식",
+    parts = [RULES, "", "# 토론 주제", cfg["topic"].strip(), ""]
+    concept = (cfg.get("concept") or "").strip()
+    if concept:
+        parts += ["# 이 토론의 설정과 분위기",
+                  "아래는 이 자리가 어떤 자리인지에 대한 설정입니다. 참가자 모두에게 똑같이 적용됩니다. "
+                  "말투, 격식, 분위기, 서로를 대하는 태도를 여기에 맞추세요. 인물 각자의 성격은 그 안에서 드러냅니다.",
+                  concept, ""]
+    parts += ["# 형식",
              MODE_LABEL.get(cfg.get("mode", "mixed"), ""),
              f"발언 길이의 기본은 {LENGTHS.get(cfg.get('length', 'normal'))}입니다.",
              f"모든 발언은 {'영어' if cfg.get('language') == 'en' else '한국어'}로 합니다.",
@@ -53,6 +60,12 @@ def shared_context(cfg: dict, briefing: str) -> str:
         parts += ["# 진행자", "## 진행자",
                   "중립을 지킵니다. 자기 의견을 내지 않고, 발언권을 정리하고, 논점을 짚고, 화제를 넘깁니다. "
                   "차분하고 또렷한 방송 진행자의 말투입니다.", ""]
+    if cfg.get("search") in ("auto", "all"):
+        parts += ["# 웹 검색",
+                  "웹 검색 도구를 쓸 수 있습니다. 최신 사실이나 구체적인 수치, 사례가 꼭 필요하다고 판단될 때만 "
+                  "말하기 전에 조용히 검색합니다. 대부분의 발언은 검색 없이 합니다. "
+                  "검색한다는 말이나 검색 과정은 발언에 넣지 않습니다. "
+                  "검색으로 확인한 내용은 어디서 본 것인지 밝히며 자연스럽게 말합니다.", ""]
     materials = cfg.get("materials") or []
     if materials or briefing:
         parts.append("# 자료")
@@ -143,8 +156,12 @@ CAST_SYSTEM = """당신은 토론 프로그램의 캐스팅 담당입니다. 주
 - 각 항목은 한두 문장으로 짧고 구체적으로 씁니다."""
 
 
-def cast_prompt(topic: str, count: int, policy: str, fixed: list[dict], materials: str) -> str:
-    lines = [f"토론 주제:\n{topic.strip()}", "", f"참가자 {count}명을 만드세요.",
+def cast_prompt(topic: str, count: int, policy: str, fixed: list[dict], materials: str,
+                concept: str = "") -> str:
+    lines = [f"토론 주제:\n{topic.strip()}", ""]
+    if concept.strip():
+        lines += ["이 토론의 설정과 분위기 (이 자리에 어울리는 사람들로 구성하세요):", concept.strip(), ""]
+    lines += [f"참가자 {count}명을 만드세요.",
              f"구성 방침: {POLICIES.get(policy, POLICIES['auto'])}"]
     if fixed:
         lines += ["", "다음 인물은 이미 정해졌습니다. 이름, 직함, 전문 분야, 성격, 말투를 그대로 옮겨 적고, "
@@ -241,3 +258,59 @@ def compact_prompt(transcript: str) -> str:
 누가 어떤 주장을 했고, 누가 누구에게 어떻게 반박했고, 무엇이 합의되고 무엇이 남았는지를 사람 이름과 함께 적으세요. 15문장 이내.
 
 {transcript}"""
+
+
+MINUTES_SYSTEM = """당신은 회의록 작성 담당입니다. 토론 기록을 바탕으로 회의록을 씁니다.
+
+- 기록에 실제로 나온 말만 씁니다. 기록에 없는 내용, 수치, 결론을 덧붙이지 않습니다.
+- 발언자의 이름은 기록에 나온 그대로 씁니다.
+- 간결한 개조식 문장으로 씁니다. 예) "~라고 주장함", "~하기로 함".
+- 후속 조치는 토론에서 누군가 실제로 하겠다고 했거나 하자고 제안한 것만 적습니다. 담당자나 기한이 기록에 없으면 지어내지 않습니다. 없으면 빈 목록으로 둡니다.
+- 합의 사항과 미결 사항도 기록에서 확인되는 것만 적습니다."""
+
+
+def minutes_schema() -> dict:
+    strings = {"type": "array", "items": {"type": "string"}}
+    return {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "overview": {"type": "string"},
+            "agenda": strings,
+            "discussions": {"type": "array", "items": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string"},
+                    "points": {"type": "array", "items": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}, "point": {"type": "string"}},
+                        "required": ["name", "point"], "additionalProperties": False}},
+                },
+                "required": ["topic", "points"], "additionalProperties": False}},
+            "agreements": strings,
+            "open_issues": strings,
+            "follow_ups": strings,
+            "conclusion": {"type": "string"},
+        },
+        "required": ["title", "overview", "agenda", "discussions", "agreements", "open_issues",
+                     "follow_ups", "conclusion"],
+        "additionalProperties": False,
+    }
+
+
+def minutes_prompt(topic: str, people: list[str], transcript: str) -> str:
+    return f"""주제: {topic.strip()}
+참석자: {', '.join(people)}
+
+기록:
+{transcript}
+
+위 기록으로 회의록을 쓰세요.
+- title: 회의록 제목
+- overview: 무엇을 두고 어떤 흐름으로 논의했는지 2~3문장
+- agenda: 다룬 안건 목록
+- discussions: 안건이나 쟁점마다, 누가 무엇을 말했는지 (points의 name은 발언자 이름)
+- agreements: 합의된 사항
+- open_issues: 결론이 나지 않은 사항
+- follow_ups: 후속 조치 (기록에 실제로 나온 것만)
+- conclusion: 맺음말 한두 문장"""

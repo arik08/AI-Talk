@@ -1,17 +1,24 @@
-"""서버 API. 토론 진행은 SSE로 흘려보내고, 조작은 POST로 받는다. 내 PC(127.0.0.1)에서만 쓴다."""
+"""서버 API. 토론 진행은 SSE로 흘려보내고, 조작은 POST로 받는다.
+
+기본은 내 PC(127.0.0.1)에서만 접속된다. .env에 AITALK_HOST=0.0.0.0을 두면 같은 망의 다른 PC도
+들어올 수 있고, 그때 AITALK_ACCESS_CODE를 정해 두면 다른 PC에는 접속 코드를 묻는다.
+"""
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
+import hashlib
+import hmac
 import json
 from typing import Any, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import materials, prompts, store
-from .config import WEB_DIST, settings
+from .config import WEB_DIST, lan_addresses, settings
 from .engine import Debate
 from .providers import get_provider
 from .providers.base import ProviderError
@@ -20,6 +27,41 @@ app = FastAPI(title="AI-Talk")
 LIVE: dict[str, Debate] = {}
 
 COMPACT_DEFAULT = {"pgpt": 200_000, "claude": 150_000, "mock": 150_000}
+
+
+def _pass(code: str) -> str:
+    """쿠키에 넣는 값. 접속 코드 자체는 쿠키에 두지 않는다 (한글 코드도 쓸 수 있게 해시로)."""
+    return hashlib.sha256(("aitalk:" + code).encode("utf-8")).hexdigest()
+
+
+def _is_local(request: Request) -> bool:
+    return bool(request.client) and request.client.host in ("127.0.0.1", "::1", "localhost")
+
+
+@app.middleware("http")
+async def access_guard(request: Request, call_next):
+    """다른 PC에서 온 요청에는 접속 코드를 확인한다. 코드를 정하지 않았으면 그냥 통과시킨다."""
+    code = settings.get("AITALK_ACCESS_CODE")
+    path = request.url.path
+    if code and path.startswith("/api/") and path != "/api/enter" and not _is_local(request):
+        given = request.cookies.get("aitalk_code", "")
+        if not hmac.compare_digest(given, _pass(code)):
+            return JSONResponse({"detail": "접속 코드가 필요합니다."}, status_code=401)
+    return await call_next(request)
+
+
+class EnterIn(BaseModel):
+    code: str
+
+
+@app.post("/api/enter")
+async def enter(body: EnterIn, response: Response) -> dict:
+    code = settings.get("AITALK_ACCESS_CODE")
+    if code and not hmac.compare_digest(body.code.encode("utf-8"), code.encode("utf-8")):
+        await asyncio.sleep(1)   # 마구 넣어 보는 것을 늦춘다
+        raise HTTPException(401, "접속 코드가 맞지 않습니다.")
+    response.set_cookie("aitalk_code", _pass(code), httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)
+    return {"ok": True}
 
 
 def _fail(exc: Exception, status: int = 502) -> HTTPException:
@@ -44,6 +86,12 @@ async def status() -> dict:
             "model": provider.default_model, "effort": provider.default_effort,
             "compact_threshold": COMPACT_DEFAULT.get(provider.name, 150_000),
             "hidden_agenda": provider.name != "pgpt",
+        },
+        "network": {
+            "shared": settings.host not in ("127.0.0.1", "localhost", "::1"),
+            "port": settings.port,
+            "addresses": lan_addresses() if settings.host not in ("127.0.0.1", "localhost", "::1") else [],
+            "code": bool(settings.get("AITALK_ACCESS_CODE")),
         },
     }
 
@@ -111,6 +159,7 @@ async def persona_draft(body: DraftIn) -> dict:
 # ---------------------------------------------------------------- 참가자 자동 생성
 class CastIn(BaseModel):
     topic: str
+    concept: str = ""
     count: int = 4
     policy: str = "auto"
     fixed: list[dict] = Field(default_factory=list)
@@ -128,7 +177,8 @@ async def cast(body: CastIn) -> dict:
     try:
         data, usage = await provider.generate_json(
             system=prompts.CAST_SYSTEM,
-            prompt=prompts.cast_prompt(body.topic, count, body.policy, body.fixed[:count], body.materials),
+            prompt=prompts.cast_prompt(body.topic, count, body.policy, body.fixed[:count], body.materials,
+                                       body.concept),
             schema=prompts.cast_schema(), model=body.model or provider.default_model,
             effort=body.effort or provider.default_effort)
     except ProviderError as exc:
@@ -159,6 +209,7 @@ async def material_upload(file: UploadFile = File(...)) -> dict:
 # ---------------------------------------------------------------- 토론
 class DebateIn(BaseModel):
     topic: str
+    concept: str = ""
     participants: list[dict]
     materials: list[dict] = Field(default_factory=list)
     urls: list[str] = Field(default_factory=list)
@@ -170,7 +221,7 @@ class DebateIn(BaseModel):
     interjection: bool = True
     speed: str = "normal"
     gap_scale: float = 1.0
-    search: str = "off"
+    search: str = "auto"
     max_searches: int = 2
     model: Optional[str] = None
     effort: Optional[str] = None
@@ -250,6 +301,38 @@ async def debate_delete(debate_id: str) -> dict:
     return {"ok": True}
 
 
+@app.post("/api/debates/{debate_id}/minutes")
+async def debate_minutes(debate_id: str) -> dict:
+    """끝난 토론의 기록으로 회의록을 만들어 기록에 함께 저장한다."""
+    live = LIVE.get(debate_id)
+    if live and live.state in ("running", "paused", "error"):
+        raise HTTPException(400, "토론이 끝난 뒤에 회의록을 만들 수 있습니다.")
+    record = store.load_debate(debate_id)
+    if not record:
+        raise HTTPException(404, "토론 기록을 찾지 못했습니다.")
+    speeches = record.get("speeches") or []
+    if not speeches:
+        raise HTTPException(400, "발언이 없어 회의록을 만들 수 없습니다.")
+    provider = get_provider()
+    cfg = record.get("config", {})
+    models = {m.id: m for m in await provider.list_models()}
+    model = cfg.get("model") if cfg.get("model") in models else provider.default_model
+    effort = cfg.get("effort") if model in models and cfg.get("effort") in models[model].efforts else provider.default_effort
+    people = [f"{p['name']}({p.get('title', '')})" for p in cfg.get("participants", [])]
+    if record.get("moderator"):
+        people.insert(0, "진행자")
+    transcript = "\n".join(f"【{s['name']}】 {s['text']}" for s in speeches)
+    try:
+        data, _ = await provider.generate_json(
+            system=prompts.MINUTES_SYSTEM, prompt=prompts.minutes_prompt(cfg.get("topic", ""), people, transcript),
+            schema=prompts.minutes_schema(), model=model, effort=effort)
+    except ProviderError as exc:
+        raise _fail(exc) from exc
+    record["minutes"] = {**data, "model": model, "written": dt.datetime.now().isoformat(timespec="seconds")}
+    store.save_debate(record)
+    return record["minutes"]
+
+
 class ControlIn(BaseModel):
     action: str
     value: Any = None
@@ -274,6 +357,7 @@ async def debate_events(debate_id: str, since: int = 0) -> StreamingResponse:
         queue: asyncio.Queue = asyncio.Queue()
         backlog = debate.events[since:]
         debate.subs.add(queue)
+        debate.viewer_joined()
         try:
             sent = since
             for event in backlog:
@@ -295,6 +379,7 @@ async def debate_events(debate_id: str, since: int = 0) -> StreamingResponse:
                     return
         finally:
             debate.subs.discard(queue)
+            debate.viewer_left()
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

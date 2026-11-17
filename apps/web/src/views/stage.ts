@@ -1,9 +1,10 @@
 import {
-  BookOpen, Brain, Flag, Hourglass, Link, ListOrdered, Megaphone, Pause, Play, Rewind, Search, Send, SkipForward,
-  TriangleAlert, Zap, type IconNode,
+  BookOpen, Brain, Copy, FileText, Flag, Hourglass, Link, ListOrdered, LoaderCircle, Megaphone, Pause, Play, Rewind,
+  Search, Send, SkipForward, TriangleAlert, Zap, type IconNode,
 } from 'lucide';
 import { api } from '../api';
 import { createAvatar, setAvatar } from '../avatar/avatar';
+import { copyText, recordToMarkdown } from '../export';
 import type { AppContext } from '../main';
 import { INTENT_LABEL, MOOD_LABEL, type DebateEvent, type DebateRecord, type Mood, type Persona } from '../types';
 import { clear, fmtTime, h, icon, put, safeColor, toast } from '../ui/dom';
@@ -12,6 +13,7 @@ interface Seat { persona: Persona; tile: HTMLElement; av: HTMLElement; urge: HTM
 interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; speaker: string; cut: boolean; started: boolean }
 
 const SPEEDS: [string, string][] = [['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']];
+const CPS: Record<string, number> = { slow: 8, normal: 14, fast: 26 };   // 서버가 글자를 내보내는 속도와 같다
 
 export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () => void {
   const seats = new Map<string, Seat>();
@@ -21,12 +23,15 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   let stream: EventSource | null = null;
   let lastIndex = -1;
   let speaking: string | null = null;
+  let spotHot = false;
   let lastSpeech: { speaker: string; cut: boolean } | null = null;
   let state = 'running';
   let badgeMode = 'on';
   let speed = 'normal';
   let disposed = false;
   let stick = true;
+  let writingMinutes = false;
+  let minutesEl: HTMLElement | null = null;
   // 다시 보기
   let replaying = false;
   let replayTimer = 0;
@@ -34,13 +39,13 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   let replayPaused = false;
   let replayRate = 1;
 
-  /* ---------- 뼈대 ---------- */
+  /* ---------- 뼈대: 왼쪽에 대화, 오른쪽에 참가자 ---------- */
   const phaseChip = h('div', { class: 'phase-chip' }, h('i'), h('span', null, '준비'));
   const topic = h('h1', { class: 'stage-topic' }, '');
   const clockTurn = h('b', null, '0');
   const clockTime = h('b', null, '00:00');
   const sideBtn = h('button', { type: 'button', class: 'btn btn--icon', tip: '자료·출처·사용량 패널', 'aria-label': '옆 패널 열고 닫기' }, icon(BookOpen, 18));
-  const cast = h('div', { class: 'cast' });
+  const cast = h('aside', { class: 'cast', 'aria-label': '참가자' });
   const spotlight = h('div', { class: 'spotlight' });
   const inner = h('div', { class: 'transcript-inner' });
   const transcript = h('div', { class: 'transcript' }, inner);
@@ -58,8 +63,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       h('div', { class: 'clock' },
         h('span', { tip: '진행한 턴' }, icon(ListOrdered, 16), clockTurn),
         h('span', { tip: '토론 시계: 실제로 말했다면 걸렸을 시간' }, icon(Hourglass, 16), clockTime), sideBtn)),
-    cast,
-    h('div', { class: 'stage-body' }, transcript, side),
+    h('div', { class: 'stage-body' }, transcript, side, cast),
     h('footer', { class: 'dock' }, h('div', { class: 'timeline' }, track), controls));
   root.append(stage);
 
@@ -67,7 +71,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     stick = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 120;
   });
   const follow = () => { if (stick) transcript.scrollTop = transcript.scrollHeight; };
-  sideBtn.addEventListener('click', () => side.classList.toggle('is-closed'));
+  sideBtn.addEventListener('click', () => { side.classList.toggle('is-closed'); if (!side.classList.contains('is-closed')) paintSide(); });
 
   /* ---------- 옆 패널 ---------- */
   let tab: 'usage' | 'sources' | 'materials' = 'usage';
@@ -94,14 +98,16 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         h('div', { class: 'kv' }, Object.entries(usage.by ?? {}).flatMap(([who, u]: [string, any]) => [
           h('span', null, who === 'director' ? '연출자(안 보임)' : seats.get(who)?.persona.name ?? who),
           h('span', null, `${u.output.toLocaleString()} 토큰`)])),
-        h('p', { class: 'muted small', style: 'margin-top:1rem' }, '비용은 공개 요금표로 어림한 값입니다.'));
+        h('p', { class: 'muted small', style: 'margin-top:1rem' }, '비용은 공개 요금표로 어림한 값입니다. 웹 검색 요금은 들어 있지 않습니다.'));
     } else if (tab === 'sources') {
       if (!sources.size) { sideBody.append(h('p', { class: 'muted' }, '웹에서 찾은 출처가 없습니다.')); return; }
       sideBody.append(h('div', { class: 'src-list' }, Array.from(sources, ([url, title]) =>
         h('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, title || url))));
     } else {
       const mats = record?.config.materials ?? [];
-      if (!mats.length && !briefing) { sideBody.append(h('p', { class: 'muted' }, '붙인 자료가 없습니다.')); return; }
+      const concept = record?.config.concept;
+      if (!mats.length && !briefing && !concept) { sideBody.append(h('p', { class: 'muted' }, '붙인 자료가 없습니다.')); return; }
+      if (concept) sideBody.append(h('h4', null, '설정과 분위기'), h('div', { class: 'brief', style: 'margin-bottom:1rem' }, concept));
       if (mats.length) sideBody.append(h('h4', null, '올린 문서'), h('div', { class: 'kv', style: 'margin-bottom:1rem' },
         mats.flatMap((m: any) => [h('span', null, m.name), h('span', null, `${Number(m.chars).toLocaleString()}자`)])));
       if (briefing) sideBody.append(h('h4', null, '진행자의 사전 조사'), h('div', { class: 'brief' }, briefing));
@@ -119,14 +125,16 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     seats.clear();
     const add = (p: Persona) => {
       const color = safeColor(p.color);
-      const av = createAvatar(p.avatar, color, 92);
+      const av = createAvatar(p.avatar, color, 72);
       setAvatar(av, { state: 'idle', mood: 'calm' });
       const urge = h('i');
       const status = h('div', { class: 'tile-status' });
       const badge = h('div', { class: 'tile-badge' }, p.id === 'moderator' ? '' : modelLabel(p.model || config.model, p.effort || config.effort));
       const tile = h('div', { class: 'tile', style: `--c:${color}` }, av,
-        h('div', { class: 'tile-name' }, p.name), h('div', { class: 'tile-sub' }, p.title),
-        p.id === 'moderator' ? null : h('div', { class: 'urge', tip: '지금 말하고 싶은 정도' }, urge), status, badge);
+        h('div', { class: 'tile-info' },
+          h('div', { class: 'tile-name' }, p.name), h('div', { class: 'tile-sub', tip: p.title }, p.title),
+          p.id === 'moderator' ? null : h('div', { class: 'urge', tip: '지금 말하고 싶은 정도' }, urge),
+          h('div', { class: 'tile-foot' }, status, badge)));
       cast.append(tile);
       seats.set(p.id!, { persona: p, tile, av, urge, status, badge });
     };
@@ -142,7 +150,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     seats.forEach((s) => { s.badge.style.display = show ? '' : 'none'; });
   }
 
-  function placeSpotlight(who: string | null, hot = false): void {
+  function placeSpotlight(who: string | null, hot = spotHot, reveal = false): void {
+    spotHot = hot;
     const seat = who ? seats.get(who) : null;
     seats.forEach((s, key) => s.tile.classList.toggle('is-speaking', key === who));
     if (!seat) { spotlight.classList.remove('is-on'); return; }
@@ -152,9 +161,10 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     spotlight.style.transform = `translate(${t.offsetLeft}px, ${t.offsetTop}px)`;
     spotlight.classList.add('is-on');
     spotlight.classList.toggle('is-hot', hot);
+    if (reveal) t.scrollIntoView({ block: 'nearest' });
   }
-  const onResize = () => placeSpotlight(speaking);
-  window.addEventListener('resize', onResize);
+  const observer = new ResizeObserver(() => placeSpotlight(speaking));
+  observer.observe(cast);
 
   function setStatus(who: string, node: IconNode | null, text = ''): void {
     const seat = seats.get(who);
@@ -189,7 +199,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     setAvatar(seat.av, { state: 'speaking', mood: (ev.mood as Mood) || 'calm', wants: false });
     seat.tile.classList.remove('is-hot');
     setStatus(ev.speaker, null);
-    placeSpotlight(ev.speaker, !!ev.interject);
+    placeSpotlight(ev.speaker, !!ev.interject, true);
 
     const av = createAvatar(p.avatar, color, 44);
     av.classList.add('is-still');
@@ -212,12 +222,20 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     follow();
   }
 
+  /** 글자가 왼쪽에서 오른쪽으로 흘러나오게 한다: 글자마다 조금씩 늦게 나타난다. */
   function addDelta(ev: DebateEvent, instant: boolean): void {
     const card = cards.get(ev.id);
     if (!card) return;
     if (!card.started) { clear(card.text); card.started = true; }
-    if (instant) card.text.append(ev.text);
-    else card.text.append(h('span', { class: 'w' }, ev.text));
+    const chars = Array.from(String(ev.text));
+    if (instant || speed === 'instant' || chars.length > 80) {
+      card.text.append(ev.text);
+    } else {
+      const step = Math.min(1000 / (CPS[speed] ?? 14) / (replaying ? replayRate : 1), 600 / chars.length);
+      const frag = document.createDocumentFragment();
+      chars.forEach((ch, i) => frag.append(h('span', { class: 'ch', style: `animation-delay:${Math.round(i * step)}ms` }, ch)));
+      card.text.append(frag);
+    }
     follow();
   }
 
@@ -228,11 +246,15 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     card.root.classList.remove('is-live');
     card.cut = !!ev.cut;
     lastSpeech = { speaker: card.speaker, cut: !!ev.cut };
-    if (!card.started || ev.cut) {
+    const plain = ev.cut ? String(ev.text).replace(/\s*—$/, '') : String(ev.text);
+    const settle = () => {
+      if (!card.root.isConnected) return;
       clear(card.text);
-      card.text.append(ev.cut ? String(ev.text).replace(/\s*—$/, '') : ev.text);
-    }
-    if (ev.cut) card.text.append(h('span', { class: 'sp-cut' }, ' —'));
+      card.text.append(plain);
+      if (ev.cut) card.text.append(h('span', { class: 'sp-cut' }, ' —'));
+    };
+    if (!card.started || ev.cut) settle();
+    else window.setTimeout(settle, 1500);   // 흘러나오는 움직임이 끝난 뒤 글자 조각을 한 덩어리로 합친다
     const foot = h('div', { class: 'sp-foot' });
     if (ev.cut) foot.append(h('span', { class: 'chip chip--ember' }, '말이 끊김'));
     for (const s of ev.sources ?? []) {
@@ -265,11 +287,12 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     }
   }
 
+  const nameColor = (name: string) => {
+    for (const s of seats.values()) if (s.persona.name === name) return safeColor(s.persona.color);
+    return '#E8C170';
+  };
+
   function addSummary(ev: DebateEvent): void {
-    const nameColor = (name: string) => {
-      for (const s of seats.values()) if (s.persona.name === name) return safeColor(s.persona.color);
-      return '#E8C170';
-    };
     inner.append(h('div', { class: 'panel frame summary' },
       h('h2', null, ev.headline),
       (ev.consensus ?? []).length ? h('div', null, h('h3', null, '대체로 동의한 점'),
@@ -281,6 +304,56 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
           h('span', { style: `color:${nameColor(pos.name)}` }, pos.name), h('span', null, pos.position)])))),
       h('div', { class: 'takeaway' }, ev.takeaway)));
     follow();
+  }
+
+  /* ---------- 회의록 ---------- */
+  function showMinutes(m: any, scroll = false): void {
+    minutesEl?.remove();
+    const list = (title: string, items: string[]) => h('div', null, h('h3', null, title),
+      items?.length ? h('ul', null, items.map((it) => h('li', null, it))) : h('p', { class: 'muted' }, '없음'));
+    minutesEl = h('div', { class: 'panel frame summary minutes' },
+      h('div', { class: 'minutes-tag' }, icon(FileText, 16), '회의록'),
+      h('h2', null, m.title),
+      h('p', { class: 'minutes-over' }, m.overview),
+      list('안건', m.agenda),
+      h('h3', null, '주요 논의'),
+      (m.discussions ?? []).map((d: any) => h('div', { class: 'issue' }, h('b', null, d.topic),
+        h('div', { class: 'issue-pos' }, (d.points ?? []).flatMap((pt: any) => [
+          h('span', { style: `color:${nameColor(pt.name)}` }, pt.name), h('span', null, pt.point)])))),
+      list('합의 사항', m.agreements), list('미결 사항', m.open_issues), list('후속 조치', m.follow_ups),
+      h('div', { class: 'takeaway' }, m.conclusion));
+    inner.append(minutesEl);
+    if (scroll) minutesEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  async function writeMinutes(): Promise<void> {
+    if (writingMinutes || !record) return;
+    writingMinutes = true;
+    paintControls();
+    try {
+      const minutes = await api.minutes(id);
+      record.minutes = minutes;
+      showMinutes(minutes, true);
+      toast('회의록을 만들었습니다.');
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    } finally {
+      writingMinutes = false;
+      paintControls();
+    }
+  }
+
+  async function copyAll(): Promise<void> {
+    if (!record) return;
+    try {
+      if (!record.speeches?.length) record = { ...(await api.debate(id)), minutes: record.minutes ?? undefined } as DebateRecord;
+    } catch { /* 가진 것으로 복사한다 */ }
+    const text = recordToMarkdown(record);
+    const ok = await copyText(text);
+    if (!ok) { toast('복사하지 못했습니다. 브라우저가 클립보드 사용을 막았습니다.', 'error'); return; }
+    toast(record.minutes
+      ? `대화 내용과 회의록을 복사했습니다 (${text.length.toLocaleString()}자).`
+      : `회의록이 아직 없어 대화 내용만 복사했습니다 (${text.length.toLocaleString()}자).`);
   }
 
   /* ---------- 이벤트 처리 ---------- */
@@ -338,7 +411,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         track.append(h('i', { class: 'tick tick--compact', style: `left:${fill.style.width || '0%'}`, tip: '문맥 압축' }));
         addNotice('info', '대화가 길어져 앞부분을 줄였습니다 (문맥 압축).');
         break;
-      case 'notice': if (ev.kind !== 'finish' || !instant) addNotice(ev.kind, ev.text); break;
+      case 'notice': if (!instant || !['finish', 'info'].includes(ev.kind)) addNotice(ev.kind, ev.text); break;
       case 'paused': state = 'paused'; paintControls(); break;
       case 'resumed': state = 'running'; paintControls(); break;
       case 'speed': speed = ev.speed; paintControls(); break;
@@ -346,7 +419,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         addNotice('error', ev.message);
         if (!ev.fatal) { state = 'error'; paintControls(); }
         break;
-      case 'summarizing': addNotice('info', '요약 카드를 만드는 중입니다.'); break;
+      case 'summarizing': if (!instant) addNotice('info', '요약 카드를 만드는 중입니다.'); break;
       case 'summary': addSummary(ev); break;
       case 'end':
         state = 'ended';
@@ -386,9 +459,14 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     }
     if (state === 'ended' || !record?.live) {
       controls.append(
+        h('button', { type: 'button', class: 'btn btn--primary', disabled: writingMinutes, onclick: () => writeMinutes() },
+          icon(writingMinutes ? LoaderCircle : FileText, 18, writingMinutes ? 'spin' : ''),
+          writingMinutes ? '회의록을 쓰는 중' : record?.minutes ? '회의록 다시 쓰기' : '회의록 쓰기'),
+        h('button', { type: 'button', class: 'btn', tip: '다른 프로그램에 붙여 넣을 수 있게 마크다운으로 복사합니다', onclick: () => copyAll() },
+          icon(Copy, 18), '대화 + 회의록 복사'),
+        h('div', { class: 'sep' }),
         h('button', { type: 'button', class: 'btn', onclick: () => startReplay() }, icon(Rewind, 18), '처음부터 다시 보기'),
-        h('button', { type: 'button', class: 'btn', onclick: () => ctx.go('#/') }, icon(Play, 18), '새 토론'),
-        h('span', { class: 'muted small' }, '토론이 끝났습니다. 기록은 자동으로 저장되었습니다.'));
+        h('button', { type: 'button', class: 'btn', onclick: () => ctx.go('#/') }, icon(Play, 18), '새 토론'));
       return;
     }
     const paused = state === 'paused' || state === 'error';
@@ -417,6 +495,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   function reset(): void {
     window.clearTimeout(replayTimer);
     clear(inner);
+    minutesEl = null;
     cards.clear();
     sources.clear();
     track.querySelectorAll('.tick').forEach((t) => t.remove());
@@ -435,7 +514,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     replaying = false;
     reset();
     for (const ev of record.events) handle(ev, true);
-    if (state !== 'ended') { state = 'ended'; }
+    state = 'ended';
+    if (record.minutes) showMinutes(record.minutes);
     paintBadges();
     paintControls();
     paintSide();
@@ -446,12 +526,13 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   function stepReplay(): void {
     if (!record || disposed || !replaying || replayPaused) return;
     const events = record.events;
-    if (replayIndex >= events.length) { replaying = false; paintControls(); return; }
+    const finish = () => { replaying = false; state = 'ended'; if (record?.minutes) showMinutes(record.minutes); paintControls(); };
+    if (replayIndex >= events.length) { finish(); return; }
     const ev = events[replayIndex];
     handle(ev, false);
     replayIndex += 1;
     const next = events[replayIndex];
-    if (!next) { replaying = false; state = 'ended'; paintControls(); return; }
+    if (!next) { finish(); return; }
     const wait = Math.min(Math.max(next.t - ev.t, 0), 6) * 1000 / replayRate;
     replayTimer = window.setTimeout(stepReplay, wait);
   }
@@ -487,14 +568,19 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       lastIndex = ev.i;
       record!.events[ev.i] = ev;
       handle(ev, false);
-      if (ev.type === 'end') { stream?.close(); record!.live = false; paintControls(); }
+      if (ev.type === 'end') {
+        stream?.close();
+        record!.live = false;
+        paintControls();
+        api.debate(id).then((saved) => { if (!disposed) { record = saved; paintControls(); } }).catch(() => undefined);
+      }
     };
   })();
 
   return () => {
     disposed = true;
     stream?.close();
+    observer.disconnect();
     window.clearTimeout(replayTimer);
-    window.removeEventListener('resize', onResize);
   };
 }
