@@ -127,7 +127,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background-position: calc(100% - 1rem) 55%, calc(100% - .7rem) 55%; background-size: .3rem .3rem; background-repeat: no-repeat; }
 .select option { background: var(--panel); }
 
-.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r); background: #0E0B08; padding: 2px; gap: 2px; }
+.seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--line); border-radius: var(--r); background: #0E0B08; padding: 2px; gap: 2px; }
 .seg button {
   min-height: 2.125rem; padding: 0 .875rem; border: 0; border-radius: 2px; background: transparent; color: var(--muted);
   font-size: .9375rem; cursor: pointer; transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
@@ -206,9 +206,13 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .concept-input { display: block; width: 100%; min-height: 3.5rem; padding: .25rem 0; border: 0; background: transparent; resize: vertical; font-size: 1rem; line-height: 1.7; color: var(--text); }
 .concept-input:focus { outline: none; }
 .concept-input::placeholder { color: #6B5F4B; }
-.slider-row { display: grid; grid-template-columns: auto minmax(8rem, 1fr) 5.5rem auto; align-items: center; gap: .75rem; }
+/* 스위치 | 슬라이더 | 숫자 칸 | 단위. 슬라이더가 남는 폭을 쓰고, 칸이 좁으면 슬라이더가 줄어든다 (옆 칸으로 넘치지 않게) */
+.slider-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 4.75rem auto; align-items: center; gap: .625rem; min-width: 0; }
+.slider-row .switch { gap: 0; }
+.slider-row .range { min-width: 0; }
+.slider-row .input { min-width: 0; padding-inline: .5rem; }
 .slider-row.is-off .range, .slider-row.is-off .input { opacity: .4; pointer-events: none; }
-.range { appearance: none; -webkit-appearance: none; width: 100%; height: 4px; border-radius: 2px; cursor: pointer; background: linear-gradient(90deg, var(--gold-lo), var(--gold-hi) var(--p, 50%), #2A2116 var(--p, 50%)); }
+.range { appearance: none; -webkit-appearance: none; width: 100%; margin: 0; height: 4px; border-radius: 2px; cursor: pointer; background: linear-gradient(90deg, var(--gold-lo), var(--gold-hi) var(--p, 50%), #2A2116 var(--p, 50%)); }
 .range:focus-visible { outline: 2px solid var(--gold); outline-offset: 6px; }
 .range::-webkit-slider-thumb { -webkit-appearance: none; width: .875rem; height: .875rem; background: var(--gold-hi); transform: rotate(45deg); box-shadow: 0 0 8px var(--gold); border: 0; transition: transform var(--fast) var(--ease); }
 .range::-webkit-slider-thumb:hover { transform: rotate(45deg) scale(1.25); }
@@ -256,7 +260,9 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .menu button { display: flex; align-items: center; gap: .625rem; width: 100%; padding: .375rem .625rem; border: 0; background: transparent; text-align: left; cursor: pointer; border-radius: 2px; font-size: .9375rem; }
 .menu button:hover { background: rgba(232, 193, 112, .1); }
 .menu .muted { font-size: .8125rem; }
-.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1.25rem 2rem; }
+/* 칸의 최소 폭을 19rem으로: 본문 폭에서 세 칸이 되어 슬라이더와 버튼 묶음이 넉넉히 들어간다 */
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1.25rem 2rem; }
+.settings-grid > * { min-width: 0; }   /* 안의 내용이 넓어도 칸을 밀어내거나 옆 칸으로 넘치지 않게 */
 .inline-num { display: flex; align-items: center; gap: .625rem; }
 .inline-num .input { width: 6rem; }
 .adv { margin-top: 1.5rem; border-top: 1px solid var(--line); padding-top: 1rem; }
