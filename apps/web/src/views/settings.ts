@@ -1,0 +1,77 @@
+import { RefreshCw } from 'lucide';
+import { AVATAR_SETS, createAvatar, setAvatar } from '../avatar/avatar';
+import type { AppContext } from '../main';
+import { MOOD_LABEL, PALETTE, type Mood } from '../types';
+import { clear, h, icon, put } from '../ui/dom';
+
+const PROVIDERS: [string, string, string][] = [
+  ['claude', 'Claude', '집에서 개발할 때. ANTHROPIC_API_KEY가 필요합니다'],
+  ['pgpt', 'P-GPT', '회사 OA망에서. PGPT_API_KEY와 PGPT_EMPNO가 필요합니다'],
+  ['mock', '시험용', 'AI를 부르지 않고 화면만 확인합니다. 요금이 들지 않습니다'],
+];
+const MOODS = Object.keys(MOOD_LABEL) as Mood[];
+
+export function mountSettings(root: HTMLElement, ctx: AppContext): () => void {
+  const body = h('div');
+  root.append(h('div', { class: 'page' },
+    h('div', { class: 'page-head' }, h('div', null, h('h1', null, '설정'), h('p', null, 'AI 연결 상태와 쓸 수 있는 모델, 아바타 움직임을 확인합니다.')),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: async () => { await ctx.refreshStatus(); paint(); } }, icon(RefreshCw, 18), '다시 확인'))),
+    body));
+
+  function paint(): void {
+    const s = ctx.status;
+    clear(body);
+    put(body,
+      h('div', { class: 'panel frame card-pad' },
+        h('h2', { class: 'block-title', style: 'margin-bottom:.75rem' }, 'AI 연결'),
+        !s ? h('div', { class: 'banner' }, '서버에 연결하지 못했습니다.') : h('div', null,
+          s.ready ? null : h('div', { class: 'banner' }, s.message),
+          h('table', { class: 'table' },
+            h('thead', null, h('tr', null, h('th', null, 'AITALK_PROVIDER'), h('th', null, '이름'), h('th', null, '쓰임'), h('th', null, '상태'))),
+            h('tbody', null, PROVIDERS.map(([key, name, note]) => h('tr', null,
+              h('td', null, h('code', null, key)), h('td', null, name), h('td', { class: 'muted' }, note),
+              h('td', null, s.provider === key ? h('span', { class: `chip ${s.ready ? 'chip--c' : 'chip--ember'}`, style: '--c:#2FC23A' }, s.ready ? '사용 중' : '준비 안 됨') : ''))))),
+          h('p', { class: 'muted small', style: 'margin-top:.875rem' },
+            '바꾸려면 프로젝트 폴더의 ', h('code', null, '.env'), ' 파일에서 ', h('code', null, 'AITALK_PROVIDER'), ' 값을 고치고 서버를 다시 켭니다. 키 값은 화면에 보여 주지 않습니다.'),
+          s.ready && s.message ? h('p', { class: 'muted small' }, s.message) : null)),
+      s?.models.length ? h('div', { class: 'panel card-pad', style: 'margin-top:1.5rem' },
+        h('h2', { class: 'block-title', style: 'margin-bottom:.75rem' }, '쓸 수 있는 모델', h('small', null, '요금은 100만 토큰당 달러, 공개 요금표 기준')),
+        h('table', { class: 'table' },
+          h('thead', null, h('tr', null, h('th', null, '모델'), h('th', null, '입력'), h('th', null, '캐시 읽기'), h('th', null, '출력'), h('th', null, '추론 노력'), h('th', null, ''))),
+          h('tbody', null, s.models.map((m) => h('tr', null,
+            h('td', null, m.label, ' ', h('span', { class: 'muted small' }, m.id)),
+            h('td', null, m.price ? `$${m.price.in}` : '-'), h('td', null, m.price ? `$${m.price.cached}` : '-'), h('td', null, m.price ? `$${m.price.out}` : '-'),
+            h('td', { class: 'muted' }, m.efforts.join(', ')),
+            h('td', null, m.id === s.defaults.model ? h('span', { class: 'chip chip--c', style: '--c:#E8C170' }, `기본 · ${s.defaults.effort}`) : (m.note ? h('span', { class: 'muted small' }, m.note) : ''))))))) : null,
+      h('div', { class: 'panel card-pad', style: 'margin-top:1.5rem' },
+        h('h2', { class: 'block-title', style: 'margin-bottom:.25rem' }, '아바타 움직임', h('small', null, '세트마다 감정 8가지를 자기 방식으로 표현합니다')),
+        gallery()));
+  }
+
+  function gallery(): HTMLElement {
+    let talking = false;
+    const wrap = h('div');
+    const draw = () => {
+      clear(wrap);
+      wrap.append(h('div', { class: 'row', style: 'margin:.75rem 0 1rem' },
+        h('button', { type: 'button', class: `chip${talking ? ' is-on' : ''}`, onclick: () => { talking = !talking; draw(); } }, talking ? '말하는 중' : '듣는 중'),
+        h('span', { class: 'muted small' }, '눌러서 말할 때와 들을 때를 바꿔 봅니다')));
+      const table = h('table', { class: 'table' },
+        h('thead', null, h('tr', null, h('th', null, '세트'), MOODS.map((m) => h('th', { style: 'text-align:center' }, MOOD_LABEL[m])))),
+        h('tbody', null, AVATAR_SETS.map((set, row) => h('tr', null,
+          h('td', null, set.label),
+          MOODS.map((m, col) => {
+            const av = createAvatar({ set: set.id, variant: set.first + ((col + row) % (set.count - set.first)) }, PALETTE[(col + row * 2) % PALETTE.length], 64);
+            setAvatar(av, { mood: m, state: talking ? 'speaking' : 'listening' });
+            return h('td', { style: 'text-align:center;padding:.875rem .25rem' }, av);
+          })))));
+      wrap.append(h('div', { style: 'overflow-x:auto' }, table));
+    };
+    draw();
+    return wrap;
+  }
+
+  paint();
+  if (!ctx.status) ctx.refreshStatus().then(paint);
+  return () => undefined;
+}

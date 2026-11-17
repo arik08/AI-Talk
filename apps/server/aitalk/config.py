@@ -43,7 +43,9 @@ class Settings:
 
     @property
     def provider(self) -> str:
-        return self.get("AITALK_PROVIDER", "mock").lower()
+        # AITALK_FORCE_PROVIDER는 시험할 때만 쓴다 (.env를 건드리지 않고 mock으로 띄우기)
+        forced = os.environ.get("AITALK_FORCE_PROVIDER", "")
+        return (forced or self.get("AITALK_PROVIDER", "mock")).lower()
 
 
 settings = Settings()

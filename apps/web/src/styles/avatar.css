@@ -1,0 +1,292 @@
+/* 모션 아바타의 움직임 프리셋.
+   data-mood  : calm agree skeptical heated curious surprised amused thinking
+   data-state : idle listening ready speaking searching cut
+   세트(봇, 얼굴, 정령, 문장)마다 같은 감정을 자기 방식으로 표현한다. */
+
+.av {
+  --c: #E8C170;
+  --ink: #ECE2CC;
+  --hot: #FF6A2A;
+  --c-dim: color-mix(in oklab, var(--c) 24%, #0E0B08);
+  --c-soft: color-mix(in oklab, var(--c) 55%, #14100B);
+  --aura: var(--c);
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--av-size, 96px);
+  height: var(--av-size, 96px);
+  transition: transform .25s var(--ease), filter .3s var(--ease), opacity .3s var(--ease);
+}
+.av-svg { position: relative; width: 100%; height: 100%; overflow: visible; }
+.av .st { fill: none; stroke: var(--c); stroke-width: 2; stroke-linecap: round; }
+.av .thin { stroke-width: 1.2; stroke: var(--c-soft); }
+.av .fl { fill: var(--c); }
+.av .shell { fill: var(--c-dim); stroke: var(--c); stroke-width: 2.2; }
+
+/* ---- 공통: 몸 전체의 움직임 (감정) ---- */
+.av-body, .crest-icon {
+  transform-box: view-box;
+  transform-origin: 50% 62%;
+  animation: av-float 5s ease-in-out var(--d, 0s) infinite;
+}
+.av[data-mood="agree"] :is(.av-body, .crest-icon) { animation: av-nod 1.5s var(--ease) infinite; }
+.av[data-mood="skeptical"] :is(.av-body, .crest-icon) { animation: av-shake 2.6s ease-in-out infinite; }
+.av[data-mood="heated"] :is(.av-body, .crest-icon) { animation: av-tremble .28s linear infinite; }
+.av[data-mood="curious"] :is(.av-body, .crest-icon) { animation: av-tilt 3.2s ease-in-out infinite; }
+.av[data-mood="surprised"] :is(.av-body, .crest-icon) { animation: av-pop .55s cubic-bezier(.3, 1.6, .5, 1) 1, av-float 5s ease-in-out .55s infinite; }
+.av[data-mood="amused"] :is(.av-body, .crest-icon) { animation: av-bounce .62s ease-in-out infinite; }
+.av[data-mood="thinking"] :is(.av-body, .crest-icon) { animation: av-sway 4.4s ease-in-out infinite; }
+.av[data-mood="heated"] { --aura: var(--hot); }
+
+@keyframes av-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.6%); } }
+@keyframes av-nod {
+  0%, 50%, 80%, 100% { transform: translateY(0) rotate(0); }
+  25% { transform: translateY(3.2%) rotate(3deg); }
+  65% { transform: translateY(2%) rotate(2deg); }
+}
+@keyframes av-shake {
+  0%, 80%, 100% { transform: translateX(0) rotate(0); }
+  20% { transform: translateX(-2.6%) rotate(-4deg); }
+  40% { transform: translateX(2.6%) rotate(4deg); }
+  60% { transform: translateX(-1.5%) rotate(-2deg); }
+}
+@keyframes av-tremble {
+  0% { transform: translate(0, 0) scale(1.03); }
+  25% { transform: translate(.9%, -.6%) scale(1.03); }
+  50% { transform: translate(-.8%, .7%) scale(1.03); }
+  75% { transform: translate(.6%, .8%) scale(1.03); }
+  100% { transform: translate(0, 0) scale(1.03); }
+}
+@keyframes av-tilt { 0%, 100% { transform: rotate(0); } 30%, 70% { transform: rotate(9deg) translateY(-1%); } }
+@keyframes av-pop { 0% { transform: scale(1); } 40% { transform: scale(1.16) translateY(-3%); } 100% { transform: scale(1); } }
+@keyframes av-bounce {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  30% { transform: translateY(-4.6%) scaleY(1.03); }
+  60% { transform: translateY(0) scaleY(.96); }
+}
+@keyframes av-sway { 0%, 100% { transform: rotate(-3deg) translateX(-1%); } 50% { transform: rotate(3deg) translateX(1%); } }
+@keyframes av-spin { to { transform: rotate(360deg); } }
+@keyframes av-blink { 0%, 93%, 100% { transform: scaleY(1); } 96.5% { transform: scaleY(.1); } }
+
+/* ---- 공통: 상태 ---- */
+.av[data-state="idle"] { opacity: .9; }
+.av[data-state="ready"] { animation: av-breathe 1.3s ease-in-out infinite; }
+.av[data-state="speaking"] { transform: scale(1.06); filter: drop-shadow(0 0 10px color-mix(in oklab, var(--aura) 55%, transparent)); }
+.av[data-state="cut"] { animation: av-recoil .6s var(--ease) 1; }
+@keyframes av-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+@keyframes av-recoil {
+  0% { transform: translateX(0); filter: brightness(1); }
+  20% { transform: translateX(-7%) rotate(-5deg); filter: brightness(.6); }
+  50% { transform: translateX(4%) rotate(2deg); }
+  100% { transform: translateX(0); filter: brightness(1); }
+}
+
+.av-aura {
+  position: absolute; inset: -14%; border-radius: 50%; pointer-events: none; opacity: 0;
+  background: radial-gradient(circle, color-mix(in oklab, var(--aura) 42%, transparent) 0%, transparent 66%);
+  transition: opacity .35s var(--ease);
+}
+.av[data-state="ready"] .av-aura { opacity: .55; }
+.av[data-state="speaking"] .av-aura { opacity: 1; animation: av-aura 1.25s ease-in-out infinite; }
+.av[data-state="searching"] .av-aura { opacity: .5; animation: av-aura 2s ease-in-out infinite; }
+@keyframes av-aura { 0%, 100% { transform: scale(.94); opacity: .65; } 50% { transform: scale(1.08); opacity: 1; } }
+
+.av-badge {
+  position: absolute; top: -7%; right: -7%; width: 34%; height: 34%; min-width: 20px; min-height: 20px;
+  display: grid; place-items: center; border-radius: 50%;
+  background: #14100B; border: 1px solid var(--aura); color: var(--aura);
+  transform: scale(0); transition: transform .28s cubic-bezier(.3, 1.6, .5, 1);
+}
+.av-badge.is-on { transform: scale(1); }
+.av-badge svg { width: 60%; height: 60%; }
+.av[data-state="searching"] .av-badge svg { animation: av-search 1.1s ease-in-out infinite; }
+@keyframes av-search { 0%, 100% { transform: translate(-8%, -8%); } 50% { transform: translate(8%, 8%); } }
+
+/* ================= 봇: 화면 속 눈과 입 막대 ================= */
+.av--bot .screen { fill: #0A0806; stroke: var(--c-soft); stroke-width: 1.2; }
+.av--bot .eye {
+  fill: var(--eye, var(--c)); transform-box: fill-box; transform-origin: center;
+  filter: drop-shadow(0 0 2.5px var(--eye, var(--c)));
+  transition: transform .28s var(--ease), fill .28s var(--ease);
+  animation: av-blink 4.8s var(--d, 0s) infinite;
+}
+.av--bot .bot-tip { animation: bot-tip 2.4s ease-in-out var(--d, 0s) infinite; }
+@keyframes bot-tip { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.av--bot .bar {
+  fill: var(--eye, var(--c)); transform-box: fill-box; transform-origin: center;
+  transform: translateY(var(--ty, 0)) scaleY(.2); transition: transform .28s var(--ease), opacity .28s;
+}
+/* 입 막대의 높낮이로 웃는 입, 처진 입을 만든다 */
+.av--bot:is([data-mood="agree"], [data-mood="amused"]) :is(.b0, .b4) { --ty: -2.6px; }
+.av--bot:is([data-mood="agree"], [data-mood="amused"]) :is(.b1, .b3) { --ty: -.4px; }
+.av--bot:is([data-mood="agree"], [data-mood="amused"]) .b2 { --ty: .8px; }
+.av--bot:is([data-mood="skeptical"], [data-mood="heated"]) :is(.b0, .b4) { --ty: 1.8px; }
+.av--bot:is([data-mood="skeptical"], [data-mood="heated"]) .b2 { --ty: -1px; }
+
+.av--bot[data-mood="agree"] .eye { animation: none; transform: translateY(-2px) scaleY(.42); }
+.av--bot[data-mood="skeptical"] .eye { animation: none; }
+.av--bot[data-mood="skeptical"] .eye-l { transform: scaleY(.32); }
+.av--bot[data-mood="skeptical"] .eye-r { transform: translateX(1.5px) scaleY(.78); }
+.av--bot[data-mood="heated"] { --eye: var(--hot); }
+.av--bot[data-mood="heated"] .eye { animation: none; }
+.av--bot[data-mood="heated"] .eye-l { transform: rotate(20deg) scaleY(.66); }
+.av--bot[data-mood="heated"] .eye-r { transform: rotate(-20deg) scaleY(.66); }
+.av--bot[data-mood="curious"] .eye { animation: none; }
+.av--bot[data-mood="curious"] .eye-l { transform: scale(1.22); }
+.av--bot[data-mood="curious"] .eye-r { transform: translateY(1px) scale(.82); }
+.av--bot[data-mood="surprised"] .eye { animation: none; transform: scale(1.3, 1.12); }
+.av--bot[data-mood="surprised"] .b2 { transform: scaleY(1); }
+.av--bot[data-mood="surprised"] :is(.b1, .b3) { transform: scaleY(.7); }
+.av--bot[data-mood="amused"] .eye { animation: none; transform: translateY(-2px) scaleY(.24); }
+.av--bot[data-mood="thinking"] .eye { animation: none; transform: translate(-2.5px, -2.5px) scale(.84); }
+.av--bot[data-mood="thinking"] .bar { animation: bot-load 1.2s ease-in-out infinite; }
+.av--bot[data-mood="thinking"] .b1 { animation-delay: .12s; }
+.av--bot[data-mood="thinking"] .b2 { animation-delay: .24s; }
+.av--bot[data-mood="thinking"] .b3 { animation-delay: .36s; }
+.av--bot[data-mood="thinking"] .b4 { animation-delay: .48s; }
+@keyframes bot-load { 0%, 100% { opacity: .25; } 40% { opacity: 1; } }
+
+/* 말할 때: 입 막대가 음성 파형처럼 뛴다 */
+.av--bot[data-state="speaking"] .bar { animation: bot-eq .42s ease-in-out infinite alternate; opacity: 1; }
+.av--bot[data-state="speaking"] .b1 { animation-duration: .31s; }
+.av--bot[data-state="speaking"] .b2 { animation-duration: .5s; }
+.av--bot[data-state="speaking"] .b3 { animation-duration: .36s; }
+.av--bot[data-state="speaking"] .b4 { animation-duration: .46s; }
+.av--bot[data-state="speaking"][data-mood="heated"] .bar { animation-name: bot-eq-hot; animation-duration: .2s; }
+.av--bot[data-state="speaking"][data-mood="heated"] :is(.b1, .b3) { animation-duration: .16s; }
+@keyframes bot-eq { from { transform: scaleY(.25); } to { transform: scaleY(1.15); } }
+@keyframes bot-eq-hot { from { transform: scaleY(.4); } to { transform: scaleY(1.45); } }
+
+/* ================= 얼굴: 눈썹, 눈, 입 ================= */
+.av--face .head { fill: var(--c-dim); stroke: var(--c); stroke-width: 2.2; transition: stroke .3s; }
+.av--face .hair { fill: var(--c); }
+.av--face .glass { fill: none; stroke: var(--c); stroke-width: 1.6; }
+.av--face :is(.eye, .brow) {
+  fill: var(--ink); transform-box: fill-box; transform-origin: center; transition: transform .26s var(--ease);
+}
+.av--face .eye { animation: av-blink 4.4s var(--d, 0s) infinite; }
+.av--face .cheek { fill: var(--hot); opacity: 0; transition: opacity .3s; }
+.av--face .m {
+  fill: none; stroke: var(--ink); stroke-width: 2.6; stroke-linecap: round; opacity: 0;
+  transform-box: fill-box; transform-origin: center; transition: opacity .2s, transform .26s var(--ease);
+}
+.av--face .m-flat { fill: var(--ink); stroke: none; }
+.av--face .m-open { fill: #0A0806; stroke-width: 2.2; }
+
+.av--face[data-mood="calm"] .m-flat { opacity: 1; }
+.av--face[data-mood="agree"] .m-smile { opacity: 1; }
+.av--face[data-mood="agree"] .brow { transform: translateY(-1px); }
+.av--face[data-mood="skeptical"] .m-flat { opacity: 1; transform: translateX(2px) rotate(-7deg); }
+.av--face[data-mood="skeptical"] .brow-l { transform: translateY(2.5px) rotate(9deg); }
+.av--face[data-mood="skeptical"] .brow-r { transform: translateY(-1.5px) rotate(-6deg); }
+.av--face[data-mood="skeptical"] .eye-l { animation: none; transform: scaleY(.5); }
+.av--face[data-mood="heated"] .head { stroke: var(--hot); }
+.av--face[data-mood="heated"] .m-frown { opacity: 1; }
+.av--face[data-mood="heated"] .brow-l { transform: translateY(2.6px) rotate(20deg); }
+.av--face[data-mood="heated"] .brow-r { transform: translateY(2.6px) rotate(-20deg); }
+.av--face[data-mood="heated"] .eye { animation: none; transform: scaleY(.72); }
+.av--face[data-mood="heated"] .cheek { opacity: .28; }
+.av--face[data-mood="curious"] .m-flat { opacity: 1; transform: scaleX(.55); }
+.av--face[data-mood="curious"] .brow-r { transform: translateY(-3.5px) rotate(-10deg); }
+.av--face[data-mood="curious"] .eye-r { transform: scale(1.15); }
+.av--face[data-mood="surprised"] .m-open { opacity: 1; transform: scale(.72); }
+.av--face[data-mood="surprised"] .brow { transform: translateY(-4px); }
+.av--face[data-mood="surprised"] .eye { animation: none; transform: scale(1.3); }
+.av--face[data-mood="amused"] .m-smile { opacity: 1; transform: scale(1.2); }
+.av--face[data-mood="amused"] .eye { animation: none; transform: scaleY(.28); }
+.av--face[data-mood="amused"] .cheek { opacity: .42; }
+.av--face[data-mood="thinking"] .m-flat { opacity: 1; transform: translateX(3px) scaleX(.5); }
+.av--face[data-mood="thinking"] .eye { animation: none; transform: translate(2px, -2.2px); }
+.av--face[data-mood="thinking"] .brow-l { transform: translateY(-2.5px); }
+
+.av--face[data-state="speaking"] .m { opacity: 0; }
+.av--face[data-state="speaking"] .m-open { opacity: 1; animation: face-talk .32s ease-in-out infinite alternate; }
+.av--face[data-state="speaking"][data-mood="heated"] .m-open { animation-duration: .2s; }
+@keyframes face-talk { from { transform: scale(.9, .3); } to { transform: scale(1.08, 1.15); } }
+
+/* ================= 정령: 고리, 위성, 핵 ================= */
+.av--orb :is(.orb-r1, .orb-r2, .orb-sats, .orb-spikes, .orb-core, .orb-ripple) { transform-box: view-box; transform-origin: 50% 50%; }
+.av--orb .orb-r1 { animation: av-spin var(--spin1, 22s) linear infinite; }
+.av--orb .orb-r2 { animation: av-spin var(--spin2, 16s) linear infinite reverse; }
+.av--orb .orb-sats { animation: av-spin var(--spin3, 9s) linear infinite; }
+.av--orb .orb-sats circle { fill: var(--core, var(--c)); }
+.av--orb .core { fill: var(--core, var(--c)); transition: fill .3s; }
+.av--orb .core-st { fill: none; stroke: var(--core, var(--c)); stroke-width: 6; transition: stroke .3s; }
+.av--orb .hl { fill: #fff; opacity: .32; }
+.av--orb .orb-core { animation: orb-breathe 3.6s ease-in-out var(--d, 0s) infinite; filter: drop-shadow(0 0 5px var(--core, var(--c))); transition: opacity .3s; }
+.av--orb .orb-spikes { opacity: 0; transition: opacity .3s; animation: av-spin 3s linear infinite; }
+.av--orb .orb-spikes rect { fill: var(--hot); }
+.av--orb .orb-ripple { fill: none; stroke: var(--core, var(--c)); stroke-width: 1.4; opacity: 0; }
+@keyframes orb-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+
+.av--orb[data-mood="agree"] { --spin1: 12s; --spin3: 5s; }
+.av--orb[data-mood="agree"] .orb-core { animation: orb-beat 1.4s ease-in-out infinite; }
+.av--orb[data-mood="skeptical"] { --spin1: 44s; --spin2: 38s; --spin3: 22s; }
+.av--orb[data-mood="skeptical"] .orb-core { animation: orb-drift 3s ease-in-out infinite; opacity: .6; }
+.av--orb[data-mood="heated"] { --spin1: 2.4s; --spin2: 1.8s; --spin3: 1.2s; --core: var(--hot); }
+.av--orb[data-mood="heated"] .orb-spikes { opacity: 1; }
+.av--orb[data-mood="heated"] .orb-core { animation: orb-beat .4s ease-in-out infinite; }
+.av--orb[data-mood="curious"] { --spin3: 2.4s; }
+.av--orb[data-mood="curious"] .orb-core { animation: orb-peek 2.4s ease-in-out infinite; }
+.av--orb[data-mood="surprised"] .rp1 { animation: orb-ripple .7s ease-out 1; }
+.av--orb[data-mood="surprised"] .rp2 { animation: orb-ripple .7s ease-out .15s 1; }
+.av--orb[data-mood="amused"] { --spin3: 3s; }
+.av--orb[data-mood="amused"] .orb-core { animation: orb-hop .6s ease-in-out infinite; }
+.av--orb[data-mood="thinking"] { --spin1: 60s; --spin3: 14s; }
+.av--orb[data-mood="thinking"] .orb-r1 circle { stroke-dasharray: 1 7; animation: orb-march 1.2s linear infinite; }
+.av--orb[data-mood="thinking"] .orb-core { animation: orb-dim 2.2s ease-in-out infinite; }
+@keyframes orb-beat { 0%, 100% { transform: scale(1); } 20% { transform: scale(1.16); } 40% { transform: scale(1.02); } 60% { transform: scale(1.1); } }
+@keyframes orb-drift { 0%, 100% { transform: translateX(-3%) scale(.9); } 50% { transform: translateX(3%) scale(.9); } }
+@keyframes orb-peek { 0%, 100% { transform: translate(0, 0); } 30% { transform: translate(3%, -3%) scale(1.06); } 60% { transform: translate(-2%, -2%) scale(1.06); } }
+@keyframes orb-hop { 0%, 100% { transform: translateY(0) scale(1); } 40% { transform: translateY(-5%) scale(1.08, .96); } }
+@keyframes orb-dim { 0%, 100% { transform: scale(.8); opacity: .65; } 50% { transform: scale(.88); opacity: 1; } }
+@keyframes orb-march { to { stroke-dashoffset: -16; } }
+@keyframes orb-ripple { 0% { transform: scale(1); opacity: .75; } 100% { transform: scale(2.3); opacity: 0; } }
+
+/* 말할 때: 핵이 뛰고 파동이 퍼진다 */
+.av--orb[data-state="speaking"] .orb-ripple { animation: orb-ripple 1.5s ease-out infinite; }
+.av--orb[data-state="speaking"] .rp2 { animation-delay: .5s; }
+.av--orb[data-state="speaking"] .rp3 { animation-delay: 1s; }
+.av--orb[data-state="speaking"] .orb-core { animation: orb-talk .42s ease-in-out infinite alternate; opacity: 1; }
+.av--orb[data-state="speaking"][data-mood="heated"] .orb-core { animation-duration: .22s; }
+@keyframes orb-talk { from { transform: scale(.92); } to { transform: scale(1.2); } }
+
+/* ================= 문장: 틀과 문양 ================= */
+.av--crest :is(.cr-f1, .cr-f2, .cr-f3, .cr-ticks) { transform-box: view-box; transform-origin: 50% 50%; }
+.av--crest .cr-f3 { animation: av-spin var(--spin, 40s) linear infinite; }
+.av--crest .cr-ticks rect { fill: var(--ico, var(--c)); transition: fill .3s; }
+.av--crest .cr-f1 .shell { transition: stroke .3s; stroke: var(--ico, var(--c)); }
+.crest-icon {
+  position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+  color: var(--ico, var(--c)); transform-origin: 50% 50%; transition: color .3s, opacity .3s;
+}
+.crest-icon svg { width: 36%; height: 36%; stroke-width: 1.6; filter: drop-shadow(0 0 4px color-mix(in oklab, var(--c) 50%, transparent)); }
+
+.av--crest[data-mood="agree"] .cr-f2 { animation: crest-beat 1.5s var(--ease) infinite; }
+.av--crest[data-mood="skeptical"] { --spin: 90s; }
+.av--crest[data-mood="skeptical"] .crest-icon { opacity: .62; }
+.av--crest[data-mood="skeptical"] .cr-f1 { animation: crest-rock 2.6s ease-in-out infinite; }
+.av--crest[data-mood="heated"] { --ico: var(--hot); --spin: 3.5s; }
+.av--crest[data-mood="heated"] .cr-ticks { animation: crest-flare .3s ease-in-out infinite alternate; }
+.av--crest[data-mood="curious"] { --spin: 9s; }
+.av--crest[data-mood="surprised"] .cr-f2 { animation: av-pop .55s cubic-bezier(.3, 1.6, .5, 1) 1; }
+.av--crest[data-mood="amused"] .cr-ticks { animation: av-spin 2.4s linear infinite; }
+.av--crest[data-mood="thinking"] .cr-f3 rect { animation: orb-march 1.4s linear infinite; }
+.av--crest[data-mood="thinking"] .crest-icon svg { animation: bot-load 2s ease-in-out infinite; }
+@keyframes crest-beat { 0%, 50%, 100% { transform: scale(1); } 25% { transform: scale(1.1); } }
+@keyframes crest-rock { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(5deg); } }
+@keyframes crest-flare { from { transform: scale(1); } to { transform: scale(1.14); } }
+
+.av--crest[data-state="speaking"] .cr-f2 { animation: crest-talk .44s ease-in-out infinite alternate; }
+.av--crest[data-state="speaking"] .crest-icon svg { animation: crest-voice .44s ease-in-out infinite alternate; }
+.av--crest[data-state="speaking"][data-mood="heated"] :is(.cr-f2, .crest-icon svg) { animation-duration: .22s; }
+@keyframes crest-talk { from { transform: scale(.96); } to { transform: scale(1.14); } }
+@keyframes crest-voice { from { transform: scale(.9); } to { transform: scale(1.18); } }
+
+/* 작은 아바타(발언 카드 등)는 가만히 둔다 */
+.av.is-still, .av.is-still * { animation: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .av, .av * { animation: none !important; transition: none !important; }
+}
