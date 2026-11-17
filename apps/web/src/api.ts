@@ -31,7 +31,7 @@ export const api = {
   importPersonas: (items: unknown[]) => request<{ added: number }>('/api/personas/import', json(items)),
   draftPersona: (hint: string) => request<Partial<Persona>>('/api/personas/draft', json({ hint })),
   cast: (body: { topic: string; concept?: string; tone?: string; count: number; policy: string; fixed: Partial<Persona>[]; materials: string; model?: string; effort?: string }) =>
-    request<{ personas: Partial<Persona>[] }>('/api/cast', json(body)),
+    request<{ personas: Partial<Persona>[]; cost?: number }>('/api/cast', json(body)),
   uploadMaterial: (file: File) => {
     const form = new FormData();
     form.append('file', file);
@@ -41,7 +41,7 @@ export const api = {
   debates: () => request<DebateSummary[]>('/api/debates'),
   debate: (id: string) => request<DebateRecord>(`/api/debates/${id}`),
   deleteDebate: (id: string) => request<{ ok: boolean }>(`/api/debates/${id}`, { method: 'DELETE' }),
-  minutes: (id: string) => request<any>(`/api/debates/${id}/minutes`, { method: 'POST' }),
+  minutes: (id: string) => request<{ minutes: any; cost: number; cost_parts: Record<string, number> }>(`/api/debates/${id}/minutes`, { method: 'POST' }),
   control: (id: string, action: string, value?: unknown) =>
     request<{ state: string }>(`/api/debates/${id}/control`, json({ action, value })),
 };

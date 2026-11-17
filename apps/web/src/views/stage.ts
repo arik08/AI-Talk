@@ -1,5 +1,5 @@
 import {
-  BookOpen, Brain, Copy, FileText, Flag, Hourglass, Link, ListOrdered, LoaderCircle, Megaphone, Pause, Play, Rewind,
+  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, Link, ListOrdered, LoaderCircle, Megaphone, Pause, Play, Rewind,
   Search, Send, SkipForward, TriangleAlert, Zap, type IconNode,
 } from 'lucide';
 import { api } from '../api';
@@ -7,10 +7,10 @@ import { createAvatar, setAvatar } from '../avatar/avatar';
 import { copyText, recordToMarkdown } from '../export';
 import type { AppContext } from '../main';
 import { INTENT_LABEL, MOOD_LABEL, TONE_LABEL, type DebateEvent, type DebateRecord, type Mood, type Persona } from '../types';
-import { clear, fmtTime, h, icon, put, safeColor, toast } from '../ui/dom';
+import { clear, fmtCost, fmtTime, h, icon, put, safeColor, toast, USD_KRW } from '../ui/dom';
 
 interface Seat { persona: Persona; tile: HTMLElement; av: HTMLElement; urge: HTMLElement; status: HTMLElement; badge: HTMLElement }
-interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; speaker: string; cut: boolean; started: boolean }
+interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; av: HTMLElement; speaker: string; cut: boolean; started: boolean }
 
 const SPEEDS: [string, string][] = [['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']];
 const CPS: Record<string, number> = { slow: 8, normal: 14, fast: 26 };   // 서버가 글자를 내보내는 속도와 같다
@@ -32,6 +32,9 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   let stick = true;
   let writingMinutes = false;
   let minutesEl: HTMLElement | null = null;
+  let costEl: HTMLElement | null = null;
+  // 비용: 토론 중에는 사용량 이벤트로, 끝난 뒤에는 저장된 기록과 회의록 응답으로 채운다
+  const money = { cost: 0, parts: {} as Record<string, number>, searches: 0, rate: ctx.status?.pricing?.usd_krw ?? USD_KRW, searchUsd: ctx.status?.pricing?.search_usd ?? 0.01 };
   // 다시 보기
   let replaying = false;
   let replayTimer = 0;
@@ -44,6 +47,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   const topic = h('h1', { class: 'stage-topic' }, '');
   const clockTurn = h('b', null, '0');
   const clockTime = h('b', null, '00:00');
+  const clockCost = h('b', null, '0원');
   const sideBtn = h('button', { type: 'button', class: 'btn btn--icon', tip: '자료·출처·사용량 패널', 'aria-label': '옆 패널 열고 닫기' }, icon(BookOpen, 18));
   const cast = h('aside', { class: 'cast', 'aria-label': '참가자' });
   const spotlight = h('div', { class: 'spotlight' });
@@ -62,7 +66,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     h('header', { class: 'stage-head' }, phaseChip, topic,
       h('div', { class: 'clock' },
         h('span', { tip: '진행한 턴' }, icon(ListOrdered, 16), clockTurn),
-        h('span', { tip: '토론 시계: 실제로 말했다면 걸렸을 시간' }, icon(Hourglass, 16), clockTime), sideBtn)),
+        h('span', { tip: '토론 시계: 실제로 말했다면 걸렸을 시간' }, icon(Hourglass, 16), clockTime),
+        h('span', { tip: '지금까지 든 예상 비용: 토큰 요금 + 웹 검색 요금' }, icon(Coins, 16), clockCost), sideBtn)),
     h('div', { class: 'stage-body' }, transcript, side, cast),
     h('footer', { class: 'dock' }, h('div', { class: 'timeline' }, track), controls));
   root.append(stage);
@@ -93,7 +98,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
           h('span', null, '캐시에서 읽은 입력'), h('span', null, `${t.cached.toLocaleString()} 토큰`),
           h('span', null, '캐시에 쓴 입력'), h('span', null, `${t.cache_write.toLocaleString()} 토큰`),
           h('span', null, '출력'), h('span', null, `${t.output.toLocaleString()} 토큰`),
-          h('span', null, '예상 비용'), h('span', null, `$${Number(usage.cost ?? 0).toFixed(4)}`),
+          h('span', null, '웹 검색'), h('span', null, `${Number(t.searches ?? 0).toLocaleString()}건`),
+          h('span', null, '예상 비용'), h('span', null, fmtCost(Number(usage.cost ?? 0), money.rate)),
           h('span', null, 'AI 호출'), h('span', null, (() => {
             const calls = usage.calls ?? {};
             const director = calls.director ?? 0;
@@ -104,7 +110,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         h('div', { class: 'kv' }, Object.entries(usage.by ?? {}).flatMap(([who, u]: [string, any]) => [
           h('span', null, who === 'director' ? '연출자(안 보임)' : seats.get(who)?.persona.name ?? who),
           h('span', null, `${u.output.toLocaleString()} 토큰`)])),
-        h('p', { class: 'muted small', style: 'margin-top:1rem' }, '비용은 공개 요금표로 어림한 값입니다. 웹 검색 요금은 들어 있지 않습니다.'));
+        h('p', { class: 'muted small', style: 'margin-top:1rem' }, `측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 웹 검색은 건당 ${fmtCost(money.searchUsd, money.rate)}, 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`));
     } else if (tab === 'sources') {
       if (!sources.size) { sideBody.append(h('p', { class: 'muted' }, '웹에서 찾은 출처가 없습니다.')); return; }
       sideBody.append(h('div', { class: 'src-list' }, Array.from(sources, ([url, title]) =>
@@ -209,9 +215,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     setStatus(ev.speaker, null);
     placeSpotlight(ev.speaker, !!ev.interject, true);
 
-    const av = createAvatar(p.avatar, color, 44);
-    av.classList.add('is-still');
-    setAvatar(av, { mood: (ev.mood as Mood) || 'calm', state: 'listening' });
+    const av = createAvatar(p.avatar, color, 44);   // 대화창의 아바타도 말하는 동안 감정대로 움직인다
+    setAvatar(av, { mood: (ev.mood as Mood) || 'calm', state: 'speaking' });
     const target = ev.target ? seats.get(ev.target)?.persona.name : '';
     const intent = INTENT_LABEL[ev.kind === 'free' ? ev.intent : ev.kind] ?? '';
     const text = h('div', { class: 'sp-text' }, h('span', { class: 'sp-wait' }, h('i'), h('i'), h('i')));
@@ -226,7 +231,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const cls = ['sp', 'is-live', ev.interject ? 'sp--interject' : '', p.id === 'moderator' ? 'sp--mod' : ''].filter(Boolean).join(' ');
     const rootEl = h('article', { class: cls, style: `--c:${color}` }, av, body);
     inner.append(rootEl);
-    cards.set(ev.id, { root: rootEl, text, body, speaker: ev.speaker, cut: false, started: false });
+    cards.set(ev.id, { root: rootEl, text, body, av, speaker: ev.speaker, cut: false, started: false });
     follow();
   }
 
@@ -252,6 +257,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     if (!card) return;
     if (ev.failed) { card.root.remove(); cards.delete(ev.id); return; }
     card.root.classList.remove('is-live');
+    setAvatar(card.av, { state: ev.cut ? 'cut' : 'listening' });   // 말이 끝나면 그 감정으로 듣는 자세가 된다
     card.cut = !!ev.cut;
     lastSpeech = { speaker: card.speaker, cut: !!ev.cut };
     const plain = ev.cut ? String(ev.text).replace(/\s*—$/, '') : String(ev.text);
@@ -334,14 +340,44 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     if (scroll) minutesEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
+  function paintCost(): void {
+    clockCost.textContent = fmtCost(money.cost, money.rate);
+  }
+
+  /** 끝난 토론의 맨 아래에 총 비용과 내역을 보여 준다. 회의록을 쓰면 그 비용까지 더해 다시 그린다. */
+  function showCost(): void {
+    costEl?.remove();
+    const p = money.parts;
+    const row = (label: string, usd: number, note = '') => h('div', { class: 'cost-row' },
+      h('span', null, label, note ? h('small', null, note) : null), h('b', null, fmtCost(usd, money.rate)));
+    const t = usage?.total ?? record?.usage;
+    costEl = h('div', { class: 'panel frame summary costcard' },
+      h('div', { class: 'minutes-tag' }, icon(Coins, 16), '총 비용'),
+      h('h2', null, fmtCost(money.cost, money.rate)),
+      h('div', { class: 'cost-rows' },
+        row('토론 (토큰)', p.tokens ?? money.cost, t ? `입력 ${(t.input + t.cached + t.cache_write).toLocaleString()} · 출력 ${t.output.toLocaleString()} 토큰` : ''),
+        row('웹 검색', p.search ?? 0, `${money.searches.toLocaleString()}건 × ${fmtCost(money.searchUsd, money.rate)}`),
+        (p.prep ?? 0) > 0 ? row('참가자 생성', p.prep) : null,
+        (p.minutes ?? 0) > 0 ? row('회의록', p.minutes) : null),
+      h('p', { class: 'muted small' }, `측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`));
+    inner.append(costEl);
+    follow();
+  }
+
   async function writeMinutes(): Promise<void> {
     if (writingMinutes || !record) return;
     writingMinutes = true;
     paintControls();
     try {
-      const minutes = await api.minutes(id);
-      record.minutes = minutes;
-      showMinutes(minutes, true);
+      const res = await api.minutes(id);
+      record.minutes = res.minutes;
+      record.cost = res.cost;
+      record.cost_parts = res.cost_parts;
+      money.cost = res.cost;
+      money.parts = res.cost_parts;
+      paintCost();
+      showMinutes(res.minutes, true);
+      showCost();
       toast('회의록을 만들었습니다.');
     } catch (err) {
       toast((err as Error).message, 'error');
@@ -368,6 +404,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   function handle(ev: DebateEvent, instant = false): void {
     switch (ev.type) {
       case 'init':
+        if (ev.pricing) money.searchUsd = ev.pricing.search_usd ?? money.searchUsd;   // 환율은 늘 지금의 고정값을 쓴다
         topic.textContent = ev.config.topic;
         badgeMode = ev.config.badge ?? 'on';
         speed = ev.config.speed ?? 'normal';
@@ -417,7 +454,14 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         }
         break;
       }
-      case 'usage': usage = ev; if (tab === 'usage' && !side.classList.contains('is-closed')) paintSide(); break;
+      case 'usage':
+        usage = ev;
+        money.cost = Number(ev.cost ?? 0);
+        money.parts = ev.cost_parts ?? { tokens: money.cost };
+        money.searches = Number(ev.total?.searches ?? 0);
+        paintCost();
+        if (tab === 'usage' && !side.classList.contains('is-closed')) paintSide();
+        break;
       case 'compaction':
         track.append(h('i', { class: 'tick tick--compact', style: `left:${fill.style.width || '0%'}`, tip: '문맥 압축' }));
         addNotice('info', '대화가 길어져 앞부분을 줄였습니다 (문맥 압축).');
@@ -441,6 +485,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         seats.forEach((s) => { setAvatar(s.av, { wants: false }); s.tile.classList.remove('is-hot'); });
         paintBadges();
         paintControls();
+        if (!instant) showCost();
         break;
       default: break;
     }
@@ -507,6 +552,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     window.clearTimeout(replayTimer);
     clear(inner);
     minutesEl = null;
+    costEl = null;
     cards.clear();
     sources.clear();
     track.querySelectorAll('.tick').forEach((t) => t.remove());
@@ -520,13 +566,26 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     clockTime.textContent = '00:00';
   }
 
+  /** 저장된 기록의 비용을 읽는다 (회의록 비용 등 토론이 끝난 뒤에 더해진 것까지). */
+  function loadMoney(): void {
+    if (!record) return;
+    if (record.pricing) money.searchUsd = record.pricing.search_usd ?? money.searchUsd;
+    if (record.cost !== undefined) money.cost = Number(record.cost);
+    if (record.cost_parts) money.parts = record.cost_parts;
+    else if (record.cost !== undefined) money.parts = { tokens: Number(record.cost) };
+    if (record.usage?.searches !== undefined) money.searches = Number(record.usage.searches);
+    paintCost();
+  }
+
   function showAll(): void {
     if (!record) return;
     replaying = false;
     reset();
     for (const ev of record.events) handle(ev, true);
     state = 'ended';
+    loadMoney();
     if (record.minutes) showMinutes(record.minutes);
+    showCost();
     paintBadges();
     paintControls();
     paintSide();
@@ -537,7 +596,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   function stepReplay(): void {
     if (!record || disposed || !replaying || replayPaused) return;
     const events = record.events;
-    const finish = () => { replaying = false; state = 'ended'; if (record?.minutes) showMinutes(record.minutes); paintControls(); };
+    const finish = () => { replaying = false; state = 'ended'; loadMoney(); if (record?.minutes) showMinutes(record.minutes); showCost(); paintControls(); };
     if (replayIndex >= events.length) { finish(); return; }
     const ev = events[replayIndex];
     handle(ev, false);
@@ -583,7 +642,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         stream?.close();
         record!.live = false;
         paintControls();
-        api.debate(id).then((saved) => { if (!disposed) { record = saved; paintControls(); } }).catch(() => undefined);
+        api.debate(id).then((saved) => { if (!disposed) { record = saved; loadMoney(); showCost(); paintControls(); } }).catch(() => undefined);
       }
     };
   })();

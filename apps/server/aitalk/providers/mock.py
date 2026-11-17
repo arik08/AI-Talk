@@ -179,7 +179,8 @@ class MockContext(Context):
             if self.rng.random() < 0.2:
                 mood = self.rng.choice(MOODS)
             target = last if last and last != n and last != "진행자" else ""
-            rows.append({"name": n, "urge": urge, "intent": intent, "target": target, "mood": mood})
+            rows.append({"name": n, "urge": urge, "intent": intent, "target": target, "mood": mood,
+                         "length": self.rng.choice(["short", "normal", "normal", "long"])})
         data = {"participants": rows, "addressed": addressed,
                 "moderator_needed": self.rng.random() < 0.08, "moderator_reason": "같은 지점에서 맞서고 있습니다."}
         return data, Usage(input=60, cached=self._tokens(), output=80)
@@ -284,7 +285,7 @@ class MockProvider(Provider):
             text="요약: 시험용 브리핑입니다. 실제 조사는 Claude나 P-GPT에서 이루어집니다.\n"
                  "쟁점: 비용 부담, 시행 속도, 형평성",
             sources=[{"title": "시험용 출처", "url": url or "https://example.com"}],
-            usage=Usage(input=500, output=120), model=model)
+            usage=Usage(input=500, output=120, searches=1), model=model)
 
     def status(self) -> dict:
         return {"ready": True, "message": "시험용 프로바이더입니다. 실제 AI를 부르지 않습니다."}

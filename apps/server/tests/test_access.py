@@ -45,7 +45,11 @@ def test_minutes_are_written_and_saved_with_the_record(monkeypatch, tmp_path):
         "events": []})
     res = client.post("/api/debates/d_min/minutes")
     assert res.status_code == 200
-    minutes = res.json()
+    body = res.json()
+    minutes = body["minutes"]
     assert minutes["title"] and minutes["discussions"]
+    assert body["cost"] > 0 and body["cost_parts"]["minutes"] > 0      # 회의록을 쓰는 비용이 총 비용에 더해진다
+    again = client.post("/api/debates/d_min/minutes").json()
+    assert again["cost_parts"]["minutes"] > body["cost_parts"]["minutes"]  # 다시 쓰면 더 쌓인다
     assert store.load_debate("d_min")["minutes"]["title"] == minutes["title"]
     assert client.post("/api/debates/d_none/minutes").status_code == 404

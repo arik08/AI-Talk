@@ -44,3 +44,11 @@ def test_director_instructions_live_in_the_shared_part_not_the_tail():
 def test_cast_prompt_mentions_tone_only_when_chosen():
     assert "분위기" not in prompts.cast_prompt("주제", 3, "auto", [], "")
     assert "유머러스" in prompts.cast_prompt("주제", 3, "auto", [], "", tone="humorous")
+
+
+def test_auto_length_is_decided_per_turn_by_the_director():
+    auto = _shared(length="auto")
+    fixed = _shared(length="short")
+    assert "발언 길이는 호출마다" in auto and "발언 길이의 기본은" not in auto
+    assert "발언 길이의 기본은 1~2문장" in fixed
+    assert "length" in auto and "length" in prompts.director_schema()["properties"]["participants"]["items"]["required"]

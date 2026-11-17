@@ -5,12 +5,13 @@ import { api } from '../api';
 import { AVATAR_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { PALETTE, type AvatarSet, type Mood, type Persona } from '../types';
-import { clear, deleteButton, h, icon, put, safeColor, toast } from '../ui/dom';
+import { clear, deleteButton, fmtCost, h, icon, put, safeColor, toast } from '../ui/dom';
 
 interface Slot extends Persona { fromLibrary?: boolean }
 interface Material { name: string; text: string; chars: number; tokens: number }
 
 const draft = {
+  prepCost: 0,   // 이 토론을 준비하며 든 비용(참가자 생성). 시작할 때 서버에 넘겨 총 비용에 더한다
   topic: '',
   concept: '',
   materials: [] as Material[],
@@ -23,7 +24,7 @@ const draft = {
   mode: 'mixed',
   turnsOn: true, maxTurns: 30,
   minutesOn: true, maxMinutes: 10,
-  length: 'normal',
+  length: 'auto',
   speed: 'normal',
   interjection: true,
   gapScale: 1,
@@ -63,6 +64,7 @@ function restore(): void {
     }
     if (!['auto', 'off'].includes(draft.search)) draft.search = 'auto';
     if (!['default', 'humorous', 'serious', 'creative'].includes(draft.tone)) draft.tone = 'default';
+    if (!['auto', 'short', 'normal', 'long'].includes(draft.length)) draft.length = 'auto';
     draft.count = Math.max(2, Math.min(10, Math.round(draft.count) || 4));
   } catch { /* 깨진 값은 무시한다 */ }
 }
@@ -233,11 +235,12 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     draft.cast.forEach((_, i) => loading.add(i));
     paintCast();
     try {
-      const { personas } = await api.cast({
+      const { personas, cost } = await api.cast({
         topic: draft.topic, concept: draft.concept, tone: draft.tone, count: draft.count, policy: draft.policy, fixed: kept,
         materials: draft.materials.map((m) => m.text).join('\n\n').slice(0, 6000),
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
+      draft.prepCost += cost ?? 0;
       const picks = pickAvatars(draft.count, draft.avatarSet);
       draft.cast = Array.from({ length: draft.count }, (_, i) => {
         const p = personas[i];
@@ -263,10 +266,11 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     loading.add(index);
     paintCast();
     try {   // 다른 참가자를 알려 주어 겹치지 않는 인물을 받는다
-      const { personas } = await api.cast({
+      const { personas, cost } = await api.cast({
         topic: draft.topic, concept: draft.concept, tone: draft.tone, count: others.length + 1, policy: draft.policy, fixed: others, materials: '',
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
+      draft.prepCost += cost ?? 0;
       const fresh = personas[others.length];
       if (fresh) {
         const old = draft.cast[index];
@@ -407,7 +411,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     (m?.efforts ?? []).forEach((e) => effortSel.append(h('option', { value: e, selected: draft.effort === e }, e)));
   };
   const modelSel = h('select', { class: 'select', onchange: () => { draft.model = modelSel.value; paintEfforts(); paintStart(); } },
-    models.map((m) => h('option', { value: m.id, selected: draft.model === m.id }, m.price ? `${m.label} · 입력 $${m.price.in} / 출력 $${m.price.out}` : m.label)));
+    models.map((m) => h('option', { value: m.id, selected: draft.model === m.id }, m.price ? `${m.label} · 입력 ${fmtCost(m.price.in)} / 출력 ${fmtCost(m.price.out)}` : m.label)));
   paintEfforts();
   const searches = h('input', { class: 'input', type: 'number', min: 1, max: 5, value: draft.maxSearches, onchange: () => { draft.maxSearches = Math.max(1, Math.min(5, Number(searches.value) || 2)); persist(); } });
   const gap = h('input', { type: 'range', min: 0, max: 2, step: 0.25, value: draft.gapScale, class: 'range', oninput: () => { draft.gapScale = Number(gap.value); gap.style.setProperty('--p', `${draft.gapScale * 50}%`); gapNote.textContent = draft.gapScale === 0 ? '뜸 없음' : `${draft.gapScale}배`; persist(); } });
@@ -430,14 +434,15 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       field('시간 제한', minutesRow, '실제로 말했다면 걸렸을 시간으로 잽니다. 둘 중 먼저 닿는 쪽에서 마무리합니다'),
       field('분위기', seg([['default', '기본'], ['humorous', '유머러스'], ['serious', '진지함'], ['creative', '창의적']], () => draft.tone, (v) => { draft.tone = v; }),
         '기본: 분위기에 대한 지시 없이 그대로 진행합니다'),
-      field('발언 길이', seg([['short', '짧게'], ['normal', '보통'], ['long', '길게']], () => draft.length, (v) => { draft.length = v; })),
+      field('발언 길이', seg([['auto', '자동'], ['short', '짧게'], ['normal', '보통'], ['long', '길게']], () => draft.length, (v) => { draft.length = v; }),
+        '자동: 상황에 따라 짧게 받아치기도 하고 길게 풀어 말하기도 합니다'),
       field('출력 속도', seg([['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']], () => draft.speed, (v) => { draft.speed = v; })),
       field('웹 검색', seg([['auto', '자동'], ['off', '끔']], () => draft.search, (v) => { draft.search = v; }),
         '자동: 참가자가 필요하다고 판단할 때만 스스로 검색합니다. 검색한 만큼 요금이 따로 듭니다')),
     h('details', { class: 'adv' },
       h('summary', null, icon(ChevronRight, 16), '고급 설정'),
       h('div', { class: 'settings-grid' },
-        field('모델', modelSel, '참가자, 진행자, 연출자가 모두 이 모델을 씁니다'),
+        field('모델', modelSel, '참가자, 진행자, 연출자가 모두 이 모델을 씁니다. 요금은 100만 토큰당 원화입니다'),
         field('추론 노력', effortSel),
         field('화자별 모델', toggle('참가자마다 모델과 추론 노력을 따로 정하기', () => draft.perSpeaker, (v) => { draft.perSpeaker = v; paintCast(); }),
           '성능이 다른 AI를 비교할 때 씁니다. 캐시 할인이 줄어듭니다'),
@@ -494,7 +499,9 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         length: draft.length, interjection: draft.interjection, speed: draft.speed, gap_scale: draft.gapScale,
         search: draft.search, max_searches: draft.maxSearches, model: draft.model || null, effort: draft.effort || null,
         badge: draft.badge, summary: draft.summary, reactions: draft.reactions, hidden_agenda: draft.hiddenAgenda,
+        prep_cost: draft.prepCost,
       });
+      draft.prepCost = 0;
       ctx.go(`#/stage/${id}`);
     } catch (err) {
       toast((err as Error).message, 'error');

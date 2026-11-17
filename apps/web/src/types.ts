@@ -38,7 +38,10 @@ export interface Status {
   models: ModelInfo[];
   defaults: { model: string; effort: string; compact_threshold: number; hidden_agenda: boolean };
   network?: { shared: boolean; port: number; addresses: string[]; code: boolean };
+  pricing?: Pricing;
 }
+
+export interface Pricing { usd_krw: number; search_usd: number }
 
 export interface DebateSummary {
   id: string;
@@ -71,6 +74,10 @@ export interface DebateRecord {
   speeches: any[];
   summary: any;
   minutes?: any;
+  cost?: number;
+  cost_parts?: Record<string, number>;
+  pricing?: Pricing;
+  usage?: any;
   briefing: string;
   turns?: number;
   seconds?: number;

@@ -42,18 +42,21 @@ class Usage:
     cached: int = 0       # 캐시에서 읽은 입력
     cache_write: int = 0  # 캐시에 새로 쓴 입력
     output: int = 0
+    searches: int = 0     # 웹 검색 건수 (건당 요금이 따로 붙는다)
 
     def add(self, other: "Usage") -> None:
         self.input += other.input
         self.cached += other.cached
         self.cache_write += other.cache_write
         self.output += other.output
+        self.searches += other.searches
 
     @property
     def total_input(self) -> int:
         return self.input + self.cached + self.cache_write
 
     def cost(self, price: Optional[dict]) -> float:
+        """토큰 요금(달러). 웹 검색 요금은 건수에 단가를 곱해 따로 더한다."""
         if not price:
             return 0.0
         return (
@@ -65,7 +68,7 @@ class Usage:
 
     def to_dict(self) -> dict:
         return {"input": self.input, "cached": self.cached,
-                "cache_write": self.cache_write, "output": self.output}
+                "cache_write": self.cache_write, "output": self.output, "searches": self.searches}
 
 
 @dataclass

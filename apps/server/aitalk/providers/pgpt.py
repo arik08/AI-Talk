@@ -152,6 +152,7 @@ class PgptProvider(Provider):
         for _ in range(4):
             speech = Speech(model=kw["model"])
             compacted = False
+            searches = 0
             try:
                 stream = await self.client.responses.create(stream=True, **kw)
                 async for event in stream:
@@ -163,6 +164,7 @@ class PgptProvider(Provider):
                         item = event.item
                         itype = getattr(item, "type", "")
                         if itype == "web_search_call":
+                            searches += 1
                             action = getattr(item, "action", None)
                             query = getattr(action, "query", "") or ""
                             if query:
@@ -182,6 +184,7 @@ class PgptProvider(Provider):
                     elif kind in ("response.failed", "error"):
                         detail = getattr(getattr(event, "response", None), "error", None) or getattr(event, "message", "")
                         raise ProviderError(f"P-GPT가 응답을 만들지 못했습니다: {str(detail)[:200]}")
+                speech.usage.searches = searches
                 return speech, compacted
             except ProviderError:
                 raise

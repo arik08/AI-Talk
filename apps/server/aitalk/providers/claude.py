@@ -49,6 +49,7 @@ def _usage(u: Any) -> Usage:
         cached=getattr(u, "cache_read_input_tokens", 0) or 0,
         cache_write=getattr(u, "cache_creation_input_tokens", 0) or 0,
         output=getattr(u, "output_tokens", 0) or 0,
+        searches=getattr(getattr(u, "server_tool_use", None), "web_search_requests", 0) or 0,
     )
 
 

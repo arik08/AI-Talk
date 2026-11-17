@@ -23,6 +23,9 @@ def _read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+USD_KRW = 1350.0   # 1달러 = 1,350원 고정
+
+
 class Settings:
     """`.env`를 먼저 보고, 없을 때만 OS 환경 변수를 본다.
 
@@ -58,6 +61,20 @@ class Settings:
             return int(self.get("AITALK_PORT", "8765"))
         except ValueError:
             return 8765
+
+
+    @property
+    def usd_krw(self) -> float:
+        """달러를 원으로 바꾸는 고정 환율. 화면의 비용은 모두 이 값으로 계산한 원화다."""
+        return USD_KRW
+
+    @property
+    def search_usd(self) -> float:
+        """웹 검색 한 건의 요금(달러). Claude 공개 요금은 1,000건에 10달러다."""
+        try:
+            return float(self.get("AITALK_SEARCH_USD", "0.01"))
+        except ValueError:
+            return 0.01
 
 
 settings = Settings()

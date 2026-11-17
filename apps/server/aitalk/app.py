@@ -87,6 +87,7 @@ async def status() -> dict:
             "compact_threshold": COMPACT_DEFAULT.get(provider.name, 150_000),
             "hidden_agenda": provider.name != "pgpt",
         },
+        "pricing": {"usd_krw": settings.usd_krw, "search_usd": settings.search_usd},
         "network": {
             "shared": settings.host not in ("127.0.0.1", "localhost", "::1"),
             "port": settings.port,
@@ -190,7 +191,9 @@ async def cast(body: CastIn) -> dict:
             for key in ("id", "name", "title", "expertise", "personality", "speech", "color", "avatar", "tags"):
                 if fixed.get(key):
                     people[i][key] = fixed[key]
-    return {"personas": people, "usage": usage.to_dict()}
+    used = body.model or provider.default_model
+    price = next((m.price for m in await provider.list_models() if m.id == used), None)
+    return {"personas": people, "usage": usage.to_dict(), "cost": round(usage.cost(price), 5)}
 
 
 # ---------------------------------------------------------------- 자료
@@ -219,7 +222,7 @@ class DebateIn(BaseModel):
     mode: str = "mixed"
     max_turns: Optional[int] = 30
     max_minutes: Optional[float] = 10
-    length: str = "normal"
+    length: str = "auto"       # auto | short | normal | long
     interjection: bool = True
     speed: str = "normal"
     gap_scale: float = 1.0
@@ -230,6 +233,7 @@ class DebateIn(BaseModel):
     badge: str = "on"
     language: str = "ko"
     summary: bool = True
+    prep_cost: float = 0       # 토론을 시작하기 전에 든 비용(참가자 생성). 총 비용에 더한다
     reactions: str = "smart"
     hidden_agenda: Optional[bool] = None
     compact_threshold: Optional[int] = None
@@ -335,14 +339,20 @@ async def debate_minutes(debate_id: str) -> dict:
         people.insert(0, "진행자")
     transcript = "\n".join(f"【{s['name']}】 {s['text']}" for s in speeches)
     try:
-        data, _ = await provider.generate_json(
+        data, usage = await provider.generate_json(
             system=prompts.MINUTES_SYSTEM, prompt=prompts.minutes_prompt(cfg.get("topic", ""), people, transcript),
             schema=prompts.minutes_schema(), model=model, effort=effort)
     except ProviderError as exc:
         raise _fail(exc) from exc
     record["minutes"] = {**data, "model": model, "written": dt.datetime.now().isoformat(timespec="seconds")}
+    # 회의록을 쓰는 데 든 비용을 총 비용에 더한다 (다시 쓰면 그만큼 더 쌓인다)
+    parts = dict(record.get("cost_parts") or {"tokens": float(record.get("cost") or 0)})
+    parts["minutes"] = round(parts.get("minutes", 0) + usage.cost(models[model].price if model in models else None), 5)
+    record["cost_parts"] = parts
+    record["cost"] = round(sum(parts.values()), 5)
+    record.setdefault("pricing", {"usd_krw": settings.usd_krw, "search_usd": settings.search_usd})
     store.save_debate(record)
-    return record["minutes"]
+    return {"minutes": record["minutes"], "cost": record["cost"], "cost_parts": parts}
 
 
 class ControlIn(BaseModel):

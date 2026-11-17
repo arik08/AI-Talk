@@ -72,7 +72,9 @@ def shared_context(cfg: dict, briefing: str) -> str:
         parts += ["# 분위기", tone, ""]
     parts += ["# 형식",
              MODE_LABEL.get(cfg.get("mode", "mixed"), ""),
-             f"발언 길이의 기본은 {LENGTHS.get(cfg.get('length', 'normal'))}입니다.",
+             ("발언 길이는 호출마다 '지금 할 일'에서 정해 줍니다. 짧게 받아칠 때와 길게 풀어 말할 때가 섞입니다."
+              if cfg.get("length") == "auto"
+              else f"발언 길이의 기본은 {LENGTHS.get(cfg.get('length', 'normal'), LENGTHS['normal'])}입니다."),
              f"모든 발언은 {'영어' if cfg.get('language') == 'en' else '한국어'}로 합니다.",
              "", "# 참가자"]
     for p in cfg["participants"]:
@@ -130,6 +132,7 @@ def director_section(names: list[str]) -> str:
 - intent: 말한다면 하려는 것. rebut(반박), add(보충), ask(질문), agree(동의), shift(화제 전환) 가운데 하나.
 - target: 누구의 말에 반응하려는가. 참가자 이름 그대로. 없으면 빈 문자열.
 - mood: 방금 발언을 들은 지금의 감정. calm(평온), agree(수긍), skeptical(못마땅), heated(격앙), curious(궁금), surprised(놀람), amused(웃음), thinking(고민) 가운데 하나. 인물의 성격과 입장에 맞게, 사람마다 다르게.
+- length: 말한다면 얼마나 길게 할 것인가. short(한두 문장으로 받아치기), normal(2~4문장), long(4~7문장으로 풀어서 말하기) 가운데 하나. 빠르게 주고받는 공방이나 짧은 확인·되물음에는 short, 새 논점을 꺼내거나 근거와 사례를 풀어야 할 때는 long. 실제 토론처럼 짧은 호흡과 긴 호흡이 섞이게 하고, 같은 길이만 계속 고르지 마세요.
 
 전체에 대해 정할 것
 - addressed: 방금 발언이 특정 참가자에게 질문했거나 그 사람을 지목했다면 그 이름, 아니면 빈 문자열.
@@ -137,7 +140,7 @@ def director_section(names: list[str]) -> str:
 - moderator_reason: 그 이유를 한 문장으로. 없으면 빈 문자열.
 
 출력 형식: 아래 모양의 JSON 하나만 씁니다. 앞뒤에 다른 글이나 코드 블록 표시를 붙이지 않고, 검색 도구도 쓰지 않습니다. participants에는 참가자 전원을 위의 순서대로 넣습니다.
-{{"participants":[{{"name":"이름","urge":5,"intent":"rebut","target":"상대 이름","mood":"calm"}}],"addressed":"","moderator_needed":false,"moderator_reason":""}}"""
+{{"participants":[{{"name":"이름","urge":5,"intent":"rebut","target":"상대 이름","mood":"calm","length":"short"}}],"addressed":"","moderator_needed":false,"moderator_reason":""}}"""
 
 
 def director_question(names: list[str], last_speaker: str) -> str:
@@ -162,8 +165,9 @@ def director_schema() -> dict:
                         "intent": {"type": "string", "enum": INTENTS},
                         "target": {"type": "string"},
                         "mood": {"type": "string", "enum": MOODS},
+                        "length": {"type": "string", "enum": list(LENGTHS)},
                     },
-                    "required": ["name", "urge", "intent", "target", "mood"],
+                    "required": ["name", "urge", "intent", "target", "mood", "length"],
                     "additionalProperties": False,
                 },
             },

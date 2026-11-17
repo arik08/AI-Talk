@@ -1,5 +1,5 @@
 import { INTENT_LABEL, TONE_LABEL, type DebateRecord } from './types';
-import { fmtTime } from './ui/dom';
+import { fmtCost, fmtTime } from './ui/dom';
 
 /** 회의록을 마크다운으로. */
 export function minutesToMarkdown(m: any): string[] {
@@ -37,7 +37,9 @@ export function recordToMarkdown(rec: DebateRecord): string {
     `- 참석자: ${people.join(', ')}`];
   if (cfg.concept) lines.push(`- 설정: ${cfg.concept}`);
   if (cfg.tone && cfg.tone !== 'default') lines.push(`- 분위기: ${TONE_LABEL[cfg.tone] ?? cfg.tone}`);
-  lines.push(`- 분량: ${rec.turns ?? rec.speeches.length}턴, 토론 시계 ${fmtTime(rec.seconds ?? 0)}`, '');
+  lines.push(`- 분량: ${rec.turns ?? rec.speeches.length}턴, 토론 시계 ${fmtTime(rec.seconds ?? 0)}`);
+  if (rec.cost) lines.push(`- 예상 비용: ${fmtCost(rec.cost)} (1달러 1,350원으로 계산)`);
+  lines.push('');
 
   if (rec.minutes) lines.push(...minutesToMarkdown(rec.minutes));
   if (rec.summary) {

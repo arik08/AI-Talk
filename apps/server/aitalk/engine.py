@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from . import materials, prompts, store
+from .config import settings
 from .providers.base import Provider, ProviderError, Speech, Usage
 
 MOD_ID = "moderator"
@@ -122,7 +123,11 @@ class Debate:
         self.usage = Usage()
         self.usage_by: dict[str, Usage] = {}
         self.calls: dict[str, int] = {}                # 누구를 위한 호출이 몇 번 있었나 ("director"는 연출자)
-        self.cost = 0.0
+        # 비용(달러)을 항목별로 쌓는다: 토큰, 웹 검색, 토론 전의 참가자 생성. 회의록 비용은 나중에 더해진다
+        self.cost_parts: dict[str, float] = {"tokens": 0.0, "search": 0.0,
+                                             "prep": max(0.0, min(float(config.get("prep_cost") or 0), 50.0))}
+        self.pricing = {"usd_krw": settings.usd_krw, "search_usd": settings.search_usd}
+        self.cost = self.cost_parts["prep"]
         self.prices: dict[str, Optional[dict]] = {}
         self.summary: Optional[dict] = None
         self._pos = 0
@@ -149,7 +154,7 @@ class Debate:
                             for m in self.cfg.get("materials") or []]
         cfg["participants"] = [{k: v for k, v in p.items() if k != "hidden"} for p in self.people]
         return {"id": self.id, "config": cfg, "moderator": self.mod, "provider": self.provider.name,
-                "created": self.created}
+                "created": self.created, "pricing": self.pricing}
 
     # ------------------------------------------------------------------ 조작
     def control(self, action: str, value: Any = None) -> None:
@@ -241,7 +246,8 @@ class Debate:
 
     def record(self) -> dict:
         return {**self.public(), "state": self.state, "turns": self.turn_no,
-                "seconds": round(self.clock), "cost": round(self.cost, 4),
+                "seconds": round(self.clock), "cost": round(self.cost, 5),
+                "cost_parts": {k: round(v, 5) for k, v in self.cost_parts.items()},
                 "usage": self.usage.to_dict(), "calls": dict(self.calls),
                 "judge_fallbacks": getattr(self.provider, "judge_fallbacks", 0), "briefing": self.briefing,
                 "speeches": self.speeches, "summary": self.summary,
@@ -292,8 +298,12 @@ class Debate:
             return "", []
 
     # ------------------------------------------------------------------ 대본(정해진 순서)
-    def _len(self) -> str:
-        return f"길이: {prompts.LENGTHS.get(self.cfg.get('length', 'normal'))}."
+    def _len(self, hint: str = "") -> str:
+        """발언 길이 지시. 자동(auto)이면 연출자가 이번 발언에 고른 길이를 쓰고, 없으면 보통으로 한다."""
+        key = self.cfg.get("length", "normal")
+        if key == "auto":
+            key = hint if hint in prompts.LENGTHS else "normal"
+        return f"길이: {prompts.LENGTHS.get(key, prompts.LENGTHS['normal'])}."
 
     def _build_opening(self) -> None:
         names = ", ".join(p["name"] for p in self.people)
@@ -455,9 +465,12 @@ class Debate:
         self.usage.add(usage)
         self.usage_by.setdefault(who, Usage()).add(usage)
         self.calls[who] = self.calls.get(who, 0) + 1
-        self.cost += usage.cost(self.prices.get(model))
+        self.cost_parts["tokens"] += usage.cost(self.prices.get(model))
+        self.cost_parts["search"] += usage.searches * self.pricing["search_usd"]
+        self.cost = sum(self.cost_parts.values())
         total = self.usage.total_input
-        self.emit("usage", total=self.usage.to_dict(), cost=round(self.cost, 4),
+        self.emit("usage", total=self.usage.to_dict(), cost=round(self.cost, 5),
+                  cost_parts={k: round(v, 5) for k, v in self.cost_parts.items()},
                   cache_rate=round(self.usage.cached / total, 3) if total else 0,
                   by={k: v.to_dict() for k, v in self.usage_by.items()}, calls=dict(self.calls))
 
@@ -568,6 +581,8 @@ class Debate:
             return None
         speaker = gen.turn.speaker
         self.ctx.commit(speaker["name"], gen.speech)
+        if not gen.speech.usage.searches:   # 사용량에 건수가 안 실려 오면 화면에 알린 검색 수로 센다
+            gen.speech.usage.searches = len(gen.searches)
         self._account(speaker["id"], gen.speech.usage, gen.speech.model or self._model(speaker))
         try:
             if await self.ctx.maybe_compact(self.cfg["model"]) or self.ctx.compactions > self._compactions_seen:
@@ -674,7 +689,7 @@ class Debate:
         self.rr += 1
         state = getattr(self, "_moods", {}).get(speaker["id"], {})
         return Turn(speaker, "free",
-                    f"자기 차례입니다. 앞선 발언들 가운데 가장 걸리는 말에 반응하며 토론을 이어가세요. {self._len()}",
+                    f"자기 차례입니다. 앞선 발언들 가운데 가장 걸리는 말에 반응하며 토론을 이어가세요. {self._len(state.get('length', ''))}",
                     "free", intent=state.get("intent", "add"), target=state.get("target", ""),
                     mood=state.get("mood", "calm"))
 
@@ -718,7 +733,8 @@ class Debate:
                 urge = max(0, min(10, int(row.get("urge", 3))))
             except (TypeError, ValueError):
                 urge = 3
-            by_id[p["id"]] = {"urge": urge, "intent": intent, "mood": mood,
+            length = row.get("length") if row.get("length") in prompts.LENGTHS else "normal"
+            by_id[p["id"]] = {"urge": urge, "intent": intent, "mood": mood, "length": length,
                               "target": target["id"] if target and target["id"] != p["id"] else ""}
         addressed = self.by_name.get(str(data.get("addressed", "")).strip())
         return {"by_id": by_id, "addressed": addressed["id"] if addressed else "",
@@ -776,7 +792,7 @@ class Debate:
             directive = ("상대의 말이 끝나기 전에 끼어듭니다. '잠깐만요' 같은 말로 짧고 빠르게 치고 들어가세요. "
                          + directive + " 길이: 1~2문장.")
         else:
-            directive += " " + self._len()
+            directive += " " + self._len(row.get("length", ""))
         return Turn(speaker, "free", directive, "free", intent=intent,
                     target=target["id"] if target else "", mood=row["mood"], interject=interject)
 

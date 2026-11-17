@@ -142,6 +142,21 @@ export function fmtTime(seconds: number): string {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
+export const USD_KRW = 1350;   // 서버의 고정 환율과 같다. 서버가 알려 주는 값이 있으면 그것을 쓴다
+
+/**
+ * 달러 금액을 원화로 적는다. 0.1원 미만은 0원, 0.1원 이상 1원 미만은 소수 한 자리, 1원 이상은 정수.
+ */
+export function fmtCost(usd: number, rate = USD_KRW): string {
+  const won = Math.max(0, usd || 0) * rate;
+  if (won < 0.1) return '0원';
+  if (won < 1) {
+    const one = Math.round(won * 10) / 10;
+    return one >= 1 ? '1원' : `${one.toFixed(1)}원`;
+  }
+  return `${Math.round(won).toLocaleString()}원`;
+}
+
 export function safeColor(value: string | undefined, fallback = '#E8C170'): string {
   return value && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
 }

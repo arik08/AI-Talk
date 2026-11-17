@@ -65,6 +65,17 @@ def test_full_debate_runs_through_all_phases(monkeypatch):
     assert judges <= needed + 1   # +1은 끝난 뒤의 요약 카드. 개회·마무리 발언만큼은 호출이 없어야 한다
 
 
+def test_cost_adds_tokens_searches_and_preparation(monkeypatch):
+    debate, saved = _run(_config(max_turns=12, prep_cost=0.25, urls=["https://example.com/a"]), monkeypatch)
+    parts = saved["cost_parts"]
+    assert parts["prep"] == 0.25                      # 토론 전에 든 참가자 생성 비용
+    assert parts["tokens"] > 0
+    assert parts["search"] == round(debate.usage.searches * debate.pricing["search_usd"], 5) > 0   # 조사 때 검색 1건
+    assert abs(saved["cost"] - sum(parts.values())) < 1e-4
+    costs = [e["cost"] for e in debate.events if e["type"] == "usage"]
+    assert costs == sorted(costs) and costs[0] >= 0.25   # 실시간 누적 비용은 줄어들지 않는다
+
+
 def test_every_started_speech_is_in_the_context_exactly_once(monkeypatch):
     debate, _ = _run(_config(), monkeypatch)
     spoken = [(s["name"], s["text"]) for s in debate.speeches]
@@ -161,3 +172,34 @@ def test_pause_and_resume(monkeypatch):
 def test_compaction_is_reported(monkeypatch):
     debate, _ = _run(_config(max_turns=40, compact_threshold=300), monkeypatch)
     assert any(e["type"] == "compaction" for e in debate.events)
+
+
+def test_auto_length_uses_the_directors_choice(monkeypatch):
+    """자동 길이: 자유토론의 발언 지시에 연출자가 고른 길이가 들어가고, 고정 길이에서는 늘 같은 길이가 들어간다."""
+    seen = []
+
+    def record(real):
+        async def speak(**kw):
+            seen.append(kw["directive"])
+            return await real(**kw)
+        return speak
+
+    for length in ("auto", "short"):
+        seen.clear()
+        monkeypatch.setattr(store, "save_debate", lambda rec: None)
+        debate = Debate("d_len", _config(length=length, moderator=False, mode="free", max_turns=14), MockProvider(latency=0, seed=11))
+
+        async def go():
+            debate.task = asyncio.create_task(debate.run())
+            while debate.ctx is None:
+                await asyncio.sleep(0.001)
+            debate.ctx.speak = record(debate.ctx.speak)
+            await asyncio.wait_for(debate.task, timeout=60)
+
+        asyncio.run(go())
+        assert debate.state == "ended"
+        lengths = {d.split("길이: ")[1].split("문장")[0] for d in seen if "길이: " in d and "마지막 발언" not in d and "끼어" not in d}
+        if length == "auto":
+            assert len(lengths) >= 2, lengths          # 짧은 호흡과 긴 호흡이 섞인다
+        else:
+            assert lengths == {"1~2"}, lengths

@@ -2,7 +2,7 @@ import { RefreshCw } from 'lucide';
 import { AVATAR_SETS, createAvatar, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { MOOD_LABEL, PALETTE, type Mood } from '../types';
-import { clear, h, icon, put } from '../ui/dom';
+import { clear, fmtCost, h, icon, put } from '../ui/dom';
 
 const PROVIDERS: [string, string, string][] = [
   ['claude', 'Claude', '집에서 개발할 때. ANTHROPIC_API_KEY가 필요합니다'],
@@ -47,12 +47,12 @@ export function mountSettings(root: HTMLElement, ctx: AppContext): () => void {
           : h('p', { class: 'muted' }, '지금은 이 PC에서만 접속됩니다. 다른 PC에서도 들어오게 하려면 ', h('code', null, '.env'), '에 ',
             h('code', null, 'AITALK_HOST=0.0.0.0'), '을 넣고 ', h('code', null, 'ai-talk.bat'), '으로 다시 켭니다. 접속 주소는 실행 창과 이 화면에 나옵니다.')) : null,
       s?.models.length ? h('div', { class: 'panel card-pad', style: 'margin-top:1.5rem' },
-        h('h2', { class: 'block-title', style: 'margin-bottom:.75rem' }, '쓸 수 있는 모델', h('small', null, '요금은 100만 토큰당 달러, 공개 요금표 기준')),
+        h('h2', { class: 'block-title', style: 'margin-bottom:.75rem' }, '쓸 수 있는 모델', h('small', null, '요금은 100만 토큰당 원화. 공개 요금표에 1달러 1,350원을 곱한 값')),
         h('table', { class: 'table' },
           h('thead', null, h('tr', null, h('th', null, '모델'), h('th', null, '입력'), h('th', null, '캐시 읽기'), h('th', null, '출력'), h('th', null, '추론 노력'), h('th', null, ''))),
           h('tbody', null, s.models.map((m) => h('tr', null,
             h('td', null, m.label, ' ', h('span', { class: 'muted small' }, m.id)),
-            h('td', null, m.price ? `$${m.price.in}` : '-'), h('td', null, m.price ? `$${m.price.cached}` : '-'), h('td', null, m.price ? `$${m.price.out}` : '-'),
+            h('td', null, m.price ? fmtCost(m.price.in) : '-'), h('td', null, m.price ? fmtCost(m.price.cached) : '-'), h('td', null, m.price ? fmtCost(m.price.out) : '-'),
             h('td', { class: 'muted' }, m.efforts.join(', ')),
             h('td', null, m.id === s.defaults.model ? h('span', { class: 'chip chip--c', style: '--c:#E8C170' }, `기본 · ${s.defaults.effort}`) : (m.note ? h('span', { class: 'muted small' }, m.note) : ''))))))) : null,
       h('div', { class: 'panel card-pad', style: 'margin-top:1.5rem' },

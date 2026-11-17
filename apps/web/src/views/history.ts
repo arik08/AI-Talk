@@ -4,7 +4,7 @@ import { createAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { copyText, recordToMarkdown } from '../export';
 import type { DebateSummary } from '../types';
-import { clear, deleteButton, fmtTime, h, icon, safeColor, toast } from '../ui/dom';
+import { clear, deleteButton, fmtCost, fmtTime, h, icon, safeColor, toast } from '../ui/dom';
 
 const STATE: Record<string, string> = { ended: '끝남', running: '진행 중', paused: '멈춤', error: '오류로 멈춤', aborted: '중단됨', failed: '실패' };
 
@@ -54,7 +54,7 @@ export function mountHistory(root: HTMLElement, ctx: AppContext): () => void {
             h('span', null, STATE[d.state] ?? d.state),
             h('span', { class: 'row', style: 'gap:.25rem' }, icon(ListOrdered, 14), `${d.turns}턴`),
             h('span', { class: 'row', style: 'gap:.25rem' }, icon(Hourglass, 14), fmtTime(d.seconds)),
-            d.cost ? h('span', null, `약 $${d.cost.toFixed(3)}`) : null)),
+            d.cost ? h('span', null, fmtCost(d.cost)) : null)),
         avs,
         h('div', { class: 'row', style: 'gap:.125rem', onclick: (e: MouseEvent) => e.stopPropagation() },
           h('button', { type: 'button', class: 'btn btn--icon', tip: '대화 + 회의록 복사', 'aria-label': '대화와 회의록 복사', onclick: () => copyMd(d.id) }, icon(Copy, 18)),
