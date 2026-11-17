@@ -309,7 +309,7 @@ class ClaudeContext(Context):
         받은 글이 JSON으로 읽히지 않을 때만 틀을 걸어 한 번 더 부른다.
         """
         msg = await self.p._create(model=model, effort=effort, system=self._system(),
-                                   messages=self._messages(question), max_tokens=4000,
+                                   messages=self._messages(question), max_tokens=12000,
                                    tools=self._tools(model))
         usage = _usage(msg.usage)
         text = "".join(b.text for b in msg.content if b.type == "text")
@@ -321,7 +321,7 @@ class ClaudeContext(Context):
             pass
         self.p.judge_fallbacks += 1
         msg = await self.p._create(model=model, effort=effort, system=self._system(),
-                                   messages=self._messages(question), max_tokens=4000,
+                                   messages=self._messages(question), max_tokens=12000,
                                    schema=schema)
         usage.add(_usage(msg.usage))
         text = next((b.text for b in msg.content if b.type == "text"), "")

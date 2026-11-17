@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import materials, prompts, store
+from . import console, materials, prompts, providers, store
 from .config import WEB_DIST, lan_addresses, settings
 from .engine import Debate
 from .providers import get_provider
@@ -87,6 +87,7 @@ async def status() -> dict:
             "compact_threshold": COMPACT_DEFAULT.get(provider.name, 150_000),
             "hidden_agenda": provider.name != "pgpt",
         },
+        "providers": providers.overview(),
         "pricing": {"usd_krw": settings.usd_krw, "search_usd": settings.search_usd},
         "network": {
             "shared": settings.host not in ("127.0.0.1", "localhost", "::1"),
@@ -95,6 +96,20 @@ async def status() -> dict:
             "code": bool(settings.get("AITALK_ACCESS_CODE")),
         },
     }
+
+
+class ProviderIn(BaseModel):
+    name: str
+
+
+@app.post("/api/provider")
+async def provider_switch(body: ProviderIn) -> dict:
+    """쓸 AI를 바꾼다. 마지막 선택을 기억한다. 진행 중인 토론은 시작할 때의 AI로 끝까지 간다."""
+    if body.name not in providers.NAMES:
+        raise HTTPException(400, "모르는 AI입니다.")
+    providers.set_active(body.name)
+    console.say(f"AI를 {providers.LABELS[body.name]}(으)로 바꿨습니다.", console.GOLD_HI)
+    return await status()
 
 
 # ---------------------------------------------------------------- 페르소나 보관함
@@ -269,11 +284,16 @@ async def debate_start(body: DebateIn) -> dict:
     LIVE[debate.id] = debate
     debate.task = asyncio.create_task(debate.run())
     debate.task.add_done_callback(lambda _task, key=debate.id: _retire(key))
+    console.say(f"토론 시작 · {cfg['topic'].strip()[:40]} · {len(cfg['participants'])}명 · {cfg['model']}", console.GOLD_HI)
     return {"id": debate.id}
 
 
 def _retire(debate_id: str) -> None:
     """끝난 토론은 저장소에 있으므로 잠시 뒤 메모리에서 내보낸다. 서버를 오래 켜 두어도 쌓이지 않는다."""
+    done = LIVE.get(debate_id)
+    if done:
+        console.say(f"토론 끝   · {done.cfg['topic'].strip()[:40]} · {done.turn_no}턴 · "
+                    f"{round(done.cost * settings.usd_krw):,}원", console.MUTED)
     try:
         asyncio.get_running_loop().call_later(300, LIVE.pop, debate_id, None)
     except RuntimeError:
@@ -317,6 +337,14 @@ async def debate_delete(debate_id: str) -> dict:
     return {"ok": True}
 
 
+def _stamp(speeches: list[dict], events: list[dict]) -> None:
+    """예전 기록에는 발언의 시작 시각이 없다. 토론 시계 이벤트로 채운다."""
+    ends = {e["turn"]: e.get("seconds", 0) for e in events if e.get("type") == "clock" and "turn" in e}
+    for s in speeches:
+        if "at" not in s:
+            s["at"] = round(ends.get(s["id"] - 1, 0))
+
+
 @app.post("/api/debates/{debate_id}/minutes")
 async def debate_minutes(debate_id: str) -> dict:
     """끝난 토론의 기록으로 회의록을 만들어 기록에 함께 저장한다."""
@@ -337,13 +365,14 @@ async def debate_minutes(debate_id: str) -> dict:
     people = [f"{p['name']}({p.get('title', '')})" for p in cfg.get("participants", [])]
     if record.get("moderator"):
         people.insert(0, "진행자")
-    transcript = "\n".join(f"【{s['name']}】 {s['text']}" for s in speeches)
+    _stamp(speeches, record.get("events") or [])
     try:
         data, usage = await provider.generate_json(
-            system=prompts.MINUTES_SYSTEM, prompt=prompts.minutes_prompt(cfg.get("topic", ""), people, transcript),
+            system=prompts.MINUTES_SYSTEM, prompt=prompts.minutes_prompt(cfg.get("topic", ""), people, speeches),
             schema=prompts.minutes_schema(), model=model, effort=effort)
     except ProviderError as exc:
         raise _fail(exc) from exc
+    prompts.stamp_timeline(data, speeches, float(record.get("seconds") or 0))
     record["minutes"] = {**data, "model": model, "written": dt.datetime.now().isoformat(timespec="seconds")}
     # 회의록을 쓰는 데 든 비용을 총 비용에 더한다 (다시 쓰면 그만큼 더 쌓인다)
     parts = dict(record.get("cost_parts") or {"tokens": float(record.get("cost") or 0)})

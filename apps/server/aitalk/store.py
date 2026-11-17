@@ -97,6 +97,18 @@ def _first_run(con: sqlite3.Connection) -> None:
     con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('seeded', ?)", (_now(),))
 
 
+# ---------------------------------------------------------------- 작은 설정값 (마지막에 고른 AI 등)
+def get_meta(key: str) -> Optional[str]:
+    with closing(_connect()) as con:
+        row = con.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_meta(key: str, value: str) -> None:
+    with closing(_connect()) as con, con:
+        con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
+
+
 # ---------------------------------------------------------------- 페르소나
 def list_personas() -> list[dict]:
     with closing(_connect()) as con:

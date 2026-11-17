@@ -53,3 +53,24 @@ def test_minutes_are_written_and_saved_with_the_record(monkeypatch, tmp_path):
     assert again["cost_parts"]["minutes"] > body["cost_parts"]["minutes"]  # 다시 쓰면 더 쌓인다
     assert store.load_debate("d_min")["minutes"]["title"] == minutes["title"]
     assert client.post("/api/debates/d_none/minutes").status_code == 404
+
+
+def test_provider_can_be_switched_and_is_remembered(monkeypatch, tmp_path):
+    from aitalk import providers
+    monkeypatch.setattr(store, "DB", tmp_path / "t.db")
+    monkeypatch.setattr(store, "_ready_for", None)
+    monkeypatch.delenv("AITALK_FORCE_PROVIDER", raising=False)
+    monkeypatch.setattr(providers, "_chosen", None)
+    monkeypatch.setattr(providers, "_loaded", False)
+    monkeypatch.setitem(settings._file, "AITALK_PROVIDER", "mock")
+    monkeypatch.setitem(settings._file, "AITALK_ACCESS_CODE", "")
+    client = TestClient(app_module.app)
+    assert client.get("/api/status").json()["provider"] == "mock"
+    res = client.post("/api/provider", json={"name": "pgpt"})
+    assert res.status_code == 200 and res.json()["provider"] == "pgpt"
+    rows = {r["name"]: r for r in res.json()["providers"]}
+    assert rows["pgpt"]["active"] and not rows["mock"]["active"]
+    monkeypatch.setattr(providers, "_loaded", False)       # 서버를 다시 켠 것처럼
+    monkeypatch.setattr(providers, "_chosen", None)
+    assert providers.active_name() == "pgpt"                # 마지막 선택을 기억한다
+    assert client.post("/api/provider", json={"name": "없는것"}).status_code == 400

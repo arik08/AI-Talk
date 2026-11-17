@@ -24,6 +24,7 @@ const json = (body: unknown): RequestInit => ({
 
 export const api = {
   status: () => request<Status>('/api/status'),
+  setProvider: (name: string) => request<Status>('/api/provider', json({ name })),
   enter: (code: string) => request<{ ok: boolean }>('/api/enter', json({ code })),
   personas: () => request<Persona[]>('/api/personas'),
   savePersona: (p: Persona) => request<Persona>('/api/personas', json(p)),

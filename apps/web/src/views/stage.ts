@@ -315,7 +315,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       (ev.issues ?? []).map((it: any, i: number) => h('div', { class: 'issue', style: `animation-delay:${200 + i * 140}ms` },
         h('b', null, it.issue),
         h('div', { class: 'issue-pos' }, it.positions.flatMap((pos: any) => [
-          h('span', { style: `color:${nameColor(pos.name)}` }, pos.name), h('span', null, pos.position)])))),
+          h('span', { style: `--c:${nameColor(pos.name)}` }, pos.name), h('span', null, pos.position)])))),
       h('div', { class: 'takeaway' }, ev.takeaway)));
     follow();
   }
@@ -328,15 +328,22 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     minutesEl = h('div', { class: 'panel frame summary minutes' },
       h('div', { class: 'minutes-tag' }, icon(FileText, 16), '회의록'),
       h('h2', null, m.title),
+      h('h3', null, '전체 흐름'),
       h('p', { class: 'minutes-over' }, m.overview),
+      (m.timeline ?? []).length ? h('div', null, h('h3', null, '시간대별 흐름'),
+        h('div', { class: 'tl' }, m.timeline.map((t: any) => h('div', { class: 'tl-item' },
+          h('div', { class: 'tl-when' }, h('b', null, t.time), h('span', null, t.turns)),
+          h('div', { class: 'tl-what' }, h('b', null, t.phase), h('p', null, t.summary),
+            (t.issues ?? []).length ? h('ul', null, t.issues.map((it: string) => h('li', null, it))) : null))))) : null,
       list('안건', m.agenda),
       h('h3', null, '주요 논의'),
       (m.discussions ?? []).map((d: any) => h('div', { class: 'issue' }, h('b', null, d.topic),
         h('div', { class: 'issue-pos' }, (d.points ?? []).flatMap((pt: any) => [
-          h('span', { style: `color:${nameColor(pt.name)}` }, pt.name), h('span', null, pt.point)])))),
+          h('span', { style: `--c:${nameColor(pt.name)}` }, pt.name), h('span', null, pt.point)])))),
       list('합의 사항', m.agreements), list('미결 사항', m.open_issues), list('후속 조치', m.follow_ups),
       h('div', { class: 'takeaway' }, m.conclusion));
     inner.append(minutesEl);
+    if (costEl) inner.append(costEl);   // 총 비용은 늘 맨 아래에
     if (scroll) minutesEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
@@ -474,7 +481,11 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         addNotice('error', ev.message);
         if (!ev.fatal) { state = 'error'; paintControls(); }
         break;
-      case 'summarizing': if (!instant) addNotice('info', '요약 카드를 만드는 중입니다.'); break;
+      case 'summarizing': if (!instant) addNotice('info', '회의록을 쓰는 중입니다.'); break;
+      case 'minutes':
+        if (record) record.minutes = ev.minutes;
+        if (!instant) { showMinutes(ev.minutes); follow(); }
+        break;
       case 'summary': addSummary(ev); break;
       case 'end':
         state = 'ended';

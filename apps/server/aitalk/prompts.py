@@ -311,57 +311,118 @@ def compact_prompt(transcript: str) -> str:
 {transcript}"""
 
 
-MINUTES_SYSTEM = """당신은 회의록 작성 담당입니다. 토론 기록을 바탕으로 회의록을 씁니다.
+MINUTES_SYSTEM = """당신은 회의록 작성 담당입니다. 토론 기록을 바탕으로 회의록을 씁니다. 읽는 사람이 토론을 보지 않고도 무슨 이야기가 어떤 순서로 오갔는지 알 수 있어야 합니다.
 
 - 기록에 실제로 나온 말만 씁니다. 기록에 없는 내용, 수치, 결론을 덧붙이지 않습니다.
 - 발언자의 이름은 기록에 나온 그대로 씁니다.
 - 간결한 개조식 문장으로 씁니다. 예) "~라고 주장함", "~하기로 함".
+- 짧게 줄이는 것보다 빠뜨리지 않는 것이 중요합니다. 누가 어떤 근거를 들었는지, 어디서 누가 물러서거나 입장을 바꿨는지를 남깁니다.
 - 후속 조치는 토론에서 누군가 실제로 하겠다고 했거나 하자고 제안한 것만 적습니다. 담당자나 기한이 기록에 없으면 지어내지 않습니다. 없으면 빈 목록으로 둡니다.
 - 합의 사항과 미결 사항도 기록에서 확인되는 것만 적습니다."""
+
+MINUTES_FIELDS = """- title: 회의록 제목
+- overview: 전체 흐름. 무엇에서 시작해 어떤 쟁점으로 옮겨 갔고 어떻게 맺었는지 순서대로 5~8문장
+- timeline: 시간 순서의 구간별 정리. 토론을 흐름이 바뀌는 지점에서 4~8개 구간으로 나눕니다. 구간마다
+  - turns: 그 구간의 턴 범위 (예: "#6~#9")
+  - time: 그 구간의 시간 범위 (예: "02:10~04:35"). 기록에 적힌 시각을 그대로 씁니다
+  - phase: 그 구간을 한마디로 (예: "모두발언", "충전 환경 공방")
+  - summary: 그 구간에서 오간 이야기 2~4문장. 누가 무엇을 말했는지 이름과 함께
+  - issues: 그 구간에서 불거진 쟁점이나 눈에 띄는 일(끼어들기, 입장 변화, 진행자 개입 등)의 목록
+- agenda: 다룬 안건 목록
+- discussions: 안건이나 쟁점마다, 누가 무엇을 어떤 근거로 말했는지 (points의 name은 발언자 이름). 발언자마다 한 줄 이상
+- agreements: 합의된 사항
+- open_issues: 결론이 나지 않은 사항
+- follow_ups: 후속 조치 (기록에 실제로 나온 것만)
+- conclusion: 맺음말 한두 문장"""
+
+MINUTES_SHAPE = ('{"title":"","overview":"","timeline":[{"turns":"#1~#5","time":"00:00~02:10","phase":"","summary":"","issues":[""]}],'
+                 '"agenda":[""],"discussions":[{"topic":"","points":[{"name":"","point":""}]}],'
+                 '"agreements":[""],"open_issues":[""],"follow_ups":[""],"conclusion":""}')
+
+
+def clock(seconds: float) -> str:
+    total = max(0, int(seconds or 0))
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def stamp_timeline(minutes: dict, speeches: list[dict], total_seconds: float) -> dict:
+    """시간대별 정리의 시각을 턴 번호로부터 다시 계산해 넣는다.
+
+    모델이 적은 시각은 앞뒤 구간이 겹치는 일이 있었다. 턴 번호는 믿을 만하므로 거기서 시각을 구한다.
+    """
+    import re
+    starts = {s["id"]: s.get("at", 0) for s in speeches}
+    last = max(starts) if starts else 0
+    for item in minutes.get("timeline") or []:
+        nums = [int(n) for n in re.findall(r"[0-9]+", str(item.get("turns", "")))]
+        nums = [n for n in nums if n in starts]
+        if not nums:
+            continue
+        first, final = min(nums), max(nums)
+        end = starts.get(final + 1, total_seconds) if final < last else total_seconds
+        item["turns"] = f"#{first}" if first == final else f"#{first}~#{final}"
+        item["time"] = f"{clock(starts[first])}~{clock(end)}"
+    return minutes
 
 
 def minutes_schema() -> dict:
     strings = {"type": "array", "items": {"type": "string"}}
+    text = {"type": "string"}
     return {
         "type": "object",
         "properties": {
-            "title": {"type": "string"},
-            "overview": {"type": "string"},
+            "title": text,
+            "overview": text,
+            "timeline": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"turns": text, "time": text, "phase": text, "summary": text, "issues": strings},
+                "required": ["turns", "time", "phase", "summary", "issues"], "additionalProperties": False}},
             "agenda": strings,
             "discussions": {"type": "array", "items": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string"},
+                    "topic": text,
                     "points": {"type": "array", "items": {
                         "type": "object",
-                        "properties": {"name": {"type": "string"}, "point": {"type": "string"}},
+                        "properties": {"name": text, "point": text},
                         "required": ["name", "point"], "additionalProperties": False}},
                 },
                 "required": ["topic", "points"], "additionalProperties": False}},
             "agreements": strings,
             "open_issues": strings,
             "follow_ups": strings,
-            "conclusion": {"type": "string"},
+            "conclusion": text,
         },
-        "required": ["title", "overview", "agenda", "discussions", "agreements", "open_issues",
+        "required": ["title", "overview", "timeline", "agenda", "discussions", "agreements", "open_issues",
                      "follow_ups", "conclusion"],
         "additionalProperties": False,
     }
 
 
-def minutes_prompt(topic: str, people: list[str], transcript: str) -> str:
+def minutes_prompt(topic: str, people: list[str], speeches: list[dict]) -> str:
+    """기록을 통째로 보내 회의록을 받는다 (끝난 토론을 나중에 다시 쓸 때)."""
+    lines = "\n".join(f"【#{s['id']} · {clock(s.get('at', 0))} · {s['name']}】 {s['text']}" for s in speeches)
     return f"""주제: {topic.strip()}
 참석자: {', '.join(people)}
 
-기록:
-{transcript}
+기록 (턴 번호 · 시작 시각 · 발언자):
+{lines}
 
 위 기록으로 회의록을 쓰세요.
-- title: 회의록 제목
-- overview: 무엇을 두고 어떤 흐름으로 논의했는지 2~3문장
-- agenda: 다룬 안건 목록
-- discussions: 안건이나 쟁점마다, 누가 무엇을 말했는지 (points의 name은 발언자 이름)
-- agreements: 합의된 사항
-- open_issues: 결론이 나지 않은 사항
-- follow_ups: 후속 조치 (기록에 실제로 나온 것만)
-- conclusion: 맺음말 한두 문장"""
+{MINUTES_FIELDS}"""
+
+
+def minutes_tail(speeches: list[dict]) -> str:
+    """토론에 쓰던 문맥에 이어서 회의록을 받는다. 기록은 이미 문맥에 있으므로 턴 번호와 시각의 차례만 알려 준다."""
+    index = "\n".join(f"#{s['id']} {clock(s.get('at', 0))} {s['name']}" + (" (말이 끊김)" if s.get("cut") else "")
+                      for s in speeches)
+    return f"""━━ 지금 할 일 (기록자 호출) ━━
+토론이 끝났습니다. 발언을 만들지 않습니다. 회의록 작성 담당으로서, 위 기록에 실제로 나온 말만 바탕으로 회의록을 JSON 하나로 출력합니다. 앞뒤에 다른 글이나 코드 블록 표시를 붙이지 않습니다.
+읽는 사람이 토론을 보지 않고도 무슨 이야기가 어떤 순서로 오갔는지 알 수 있게, 줄이는 것보다 빠뜨리지 않는 데 힘씁니다. 개조식 문장("~라고 주장함")으로 쓰고, 기록에 없는 담당자나 기한을 지어내지 않습니다.
+
+기록의 발언 차례 (턴 번호, 시작 시각, 발언자). 위 기록과 같은 순서입니다:
+{index}
+
+{MINUTES_FIELDS}
+
+{MINUTES_SHAPE}"""

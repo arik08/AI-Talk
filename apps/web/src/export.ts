@@ -3,24 +3,32 @@ import { fmtCost, fmtTime } from './ui/dom';
 
 /** 회의록을 마크다운으로. */
 export function minutesToMarkdown(m: any): string[] {
-  const lines: string[] = ['## 회의록', '', `### ${m.title}`, '', m.overview, ''];
+  const lines: string[] = ['## 회의록', '', `### ${m.title}`, '', '#### 전체 흐름', '', m.overview, ''];
   const list = (title: string, items: string[]) => {
-    lines.push(`### ${title}`, '');
+    lines.push(`#### ${title}`, '');
     if (items?.length) items.forEach((it) => lines.push(`- ${it}`));
     else lines.push('- 없음');
     lines.push('');
   };
+  if (m.timeline?.length) {
+    lines.push('#### 시간대별 흐름', '');
+    for (const t of m.timeline) {
+      lines.push(`- **${t.time} (${t.turns}) ${t.phase}**: ${t.summary}`);
+      for (const issue of t.issues ?? []) lines.push(`  - ${issue}`);
+    }
+    lines.push('');
+  }
   list('안건', m.agenda);
-  lines.push('### 주요 논의', '');
+  lines.push('#### 주요 논의', '');
   for (const d of m.discussions ?? []) {
-    lines.push(`#### ${d.topic}`, '');
+    lines.push(`##### ${d.topic}`, '');
     for (const pt of d.points ?? []) lines.push(`- **${pt.name}**: ${pt.point}`);
     lines.push('');
   }
   list('합의 사항', m.agreements);
   list('미결 사항', m.open_issues);
   list('후속 조치', m.follow_ups);
-  lines.push('### 맺음', '', m.conclusion, '');
+  lines.push('#### 맺음', '', m.conclusion, '');
   return lines;
 }
 

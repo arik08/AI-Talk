@@ -5,7 +5,7 @@ import '@fontsource/cinzel/700.css';
 import './styles/app.css';
 import './styles/avatar.css';
 
-import { History, KeyRound, MessagesSquare, Settings, Users } from 'lucide';
+import { History, KeyRound, MessagesSquare, Moon, Settings, Sun, Users } from 'lucide';
 import { api } from './api';
 import type { Status } from './types';
 import { clear, h, icon, installTooltips } from './ui/dom';
@@ -31,13 +31,30 @@ const NAV = [
 const PROVIDER_LABEL: Record<string, string> = { claude: 'Claude', pgpt: 'P-GPT', mock: '시험용(mock)' };
 
 const app = document.getElementById('app')!;
-const prov = h('div', { class: 'prov', tip: '지금 쓰는 AI. .env의 AITALK_PROVIDER로 바꿉니다' }, h('i'), h('span', null, '연결 확인 중'));
+const prov = h('a', { class: 'prov', href: '#/settings', tip: '지금 쓰는 AI. 눌러서 설정 화면에서 바꿉니다' }, h('i'), h('span', null, '연결 확인 중'));
+
+/* 테마: 처음에는 어두운 화면. 마지막에 고른 것을 이 브라우저에 기억한다 (index.html이 먼저 읽어 깜빡임을 막는다) */
+const THEME_KEY = 'aitalk.theme';
+const themeBtn = h('button', { type: 'button', class: 'btn btn--icon' });
+function paintTheme(): void {
+  const light = document.documentElement.dataset.theme === 'light';
+  themeBtn.replaceChildren(icon(light ? Moon : Sun, 18));
+  themeBtn.dataset.tip = light ? '어두운 화면으로' : '밝은 화면으로';
+  themeBtn.setAttribute('aria-label', themeBtn.dataset.tip);
+}
+themeBtn.addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem(THEME_KEY, next); } catch { /* 저장이 막혀 있어도 이번에는 바뀐다 */ }
+  paintTheme();
+});
+paintTheme();
 const nav = h('nav', { class: 'nav' }, NAV.map((n) => h('a', { class: 'nav-link', href: n.hash }, icon(n.icon, 18), n.label)));
 const view = h('main', { id: 'view' });
 app.append(
   h('header', { class: 'topbar' },
     h('a', { class: 'logo', href: '#/', html: 'AI<span>·</span>TALK' }), nav,
-    h('div', { class: 'topbar-right' }, prov)),
+    h('div', { class: 'topbar-right' }, themeBtn, prov)),
   view,
 );
 installTooltips();

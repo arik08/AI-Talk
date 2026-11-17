@@ -5,10 +5,11 @@
 
 .av {
   --c: #E8C170;
-  --ink: #ECE2CC;
+  --cs: var(--c);            /* 선과 채움에 쓰는 색. 밝은 테마에서는 조금 어둡게 섞는다 */
+  --ink: var(--av-ink, #ECE2CC);
   --hot: #FF6A2A;
-  --c-dim: color-mix(in oklab, var(--c) 24%, #0E0B08);
-  --c-soft: color-mix(in oklab, var(--c) 55%, #14100B);
+  --c-dim: color-mix(in oklab, var(--c) 24%, var(--av-base, #0E0B08));
+  --c-soft: color-mix(in oklab, var(--c) 55%, var(--av-base, #14100B));
   --aura: var(--c);
   position: relative;
   display: inline-grid;
@@ -19,10 +20,13 @@
   transition: transform .25s var(--ease), filter .3s var(--ease), opacity .3s var(--ease);
 }
 .av-svg { position: relative; width: 100%; height: 100%; overflow: visible; }
-.av .st { fill: none; stroke: var(--c); stroke-width: 2; stroke-linecap: round; }
+.av .st { fill: none; stroke: var(--cs); stroke-width: 2; stroke-linecap: round; }
 .av .thin { stroke-width: 1.2; stroke: var(--c-soft); }
-.av .fl { fill: var(--c); }
-.av .shell { fill: var(--c-dim); stroke: var(--c); stroke-width: 2.2; }
+.av .fl { fill: var(--cs); }
+.av .shell { fill: var(--c-dim); stroke: var(--cs); stroke-width: 2.2; }
+
+:root[data-theme="light"] .av { --cs: color-mix(in oklab, var(--c) 68%, #3A2A10); }
+:root[data-theme="light"] .av-badge { color: color-mix(in oklab, var(--aura) 55%, #2B2216); border-color: color-mix(in oklab, var(--aura) 70%, #2B2216); }
 
 /* ---- 공통: 몸 전체의 움직임 (감정) ---- */
 .av-body, .crest-icon {
@@ -95,7 +99,7 @@
 .av-badge {
   position: absolute; top: -7%; right: -7%; width: 34%; height: 34%; min-width: 20px; min-height: 20px;
   display: grid; place-items: center; border-radius: 50%;
-  background: #14100B; border: 1px solid var(--aura); color: var(--aura);
+  background: var(--panel, #14100B); border: 1px solid var(--aura); color: var(--aura);
   transform: scale(0); transition: transform .28s cubic-bezier(.3, 1.6, .5, 1);
 }
 .av-badge.is-on { transform: scale(1); }
@@ -106,15 +110,15 @@
 /* ================= 봇: 화면 속 눈과 입 막대 ================= */
 .av--bot .screen { fill: #0A0806; stroke: var(--c-soft); stroke-width: 1.2; }
 .av--bot .eye {
-  fill: var(--eye, var(--c)); transform-box: fill-box; transform-origin: center;
-  filter: drop-shadow(0 0 2.5px var(--eye, var(--c)));
+  fill: var(--eye, var(--cs)); transform-box: fill-box; transform-origin: center;
+  filter: drop-shadow(0 0 2.5px var(--eye, var(--cs)));
   transition: transform .28s var(--ease), fill .28s var(--ease);
   animation: av-blink 4.8s var(--d, 0s) infinite;
 }
 .av--bot .bot-tip { animation: bot-tip 2.4s ease-in-out var(--d, 0s) infinite; }
 @keyframes bot-tip { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .av--bot .bar {
-  fill: var(--eye, var(--c)); transform-box: fill-box; transform-origin: center;
+  fill: var(--eye, var(--cs)); transform-box: fill-box; transform-origin: center;
   transform: translateY(var(--ty, 0)) scaleY(.2); transition: transform .28s var(--ease), opacity .28s;
 }
 /* 입 막대의 높낮이로 웃는 입, 처진 입을 만든다 */
@@ -159,9 +163,9 @@
 @keyframes bot-eq-hot { from { transform: scaleY(.4); } to { transform: scaleY(1.45); } }
 
 /* ================= 얼굴: 눈썹, 눈, 입 ================= */
-.av--face .head { fill: var(--c-dim); stroke: var(--c); stroke-width: 2.2; transition: stroke .3s; }
-.av--face .hair { fill: var(--c); }
-.av--face .glass { fill: none; stroke: var(--c); stroke-width: 1.6; }
+.av--face .head { fill: var(--c-dim); stroke: var(--cs); stroke-width: 2.2; transition: stroke .3s; }
+.av--face .hair { fill: var(--cs); }
+.av--face .glass { fill: none; stroke: var(--cs); stroke-width: 1.6; }
 .av--face :is(.eye, .brow) {
   fill: var(--ink); transform-box: fill-box; transform-origin: center; transition: transform .26s var(--ease);
 }
@@ -210,14 +214,14 @@
 .av--orb .orb-r1 { animation: av-spin var(--spin1, 22s) linear infinite; }
 .av--orb .orb-r2 { animation: av-spin var(--spin2, 16s) linear infinite reverse; }
 .av--orb .orb-sats { animation: av-spin var(--spin3, 9s) linear infinite; }
-.av--orb .orb-sats circle { fill: var(--core, var(--c)); }
-.av--orb .core { fill: var(--core, var(--c)); transition: fill .3s; }
-.av--orb .core-st { fill: none; stroke: var(--core, var(--c)); stroke-width: 6; transition: stroke .3s; }
+.av--orb .orb-sats circle { fill: var(--core, var(--cs)); }
+.av--orb .core { fill: var(--core, var(--cs)); transition: fill .3s; }
+.av--orb .core-st { fill: none; stroke: var(--core, var(--cs)); stroke-width: 6; transition: stroke .3s; }
 .av--orb .hl { fill: #fff; opacity: .32; }
-.av--orb .orb-core { animation: orb-breathe 3.6s ease-in-out var(--d, 0s) infinite; filter: drop-shadow(0 0 5px var(--core, var(--c))); transition: opacity .3s; }
+.av--orb .orb-core { animation: orb-breathe 3.6s ease-in-out var(--d, 0s) infinite; filter: drop-shadow(0 0 5px var(--core, var(--cs))); transition: opacity .3s; }
 .av--orb .orb-spikes { opacity: 0; transition: opacity .3s; animation: av-spin 3s linear infinite; }
 .av--orb .orb-spikes rect { fill: var(--hot); }
-.av--orb .orb-ripple { fill: none; stroke: var(--core, var(--c)); stroke-width: 1.4; opacity: 0; }
+.av--orb .orb-ripple { fill: none; stroke: var(--core, var(--cs)); stroke-width: 1.4; opacity: 0; }
 @keyframes orb-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
 
 .av--orb[data-mood="agree"] { --spin1: 12s; --spin3: 5s; }
@@ -255,13 +259,13 @@
 /* ================= 문장: 틀과 문양 ================= */
 .av--crest :is(.cr-f1, .cr-f2, .cr-f3, .cr-ticks) { transform-box: view-box; transform-origin: 50% 50%; }
 .av--crest .cr-f3 { animation: av-spin var(--spin, 40s) linear infinite; }
-.av--crest .cr-ticks rect { fill: var(--ico, var(--c)); transition: fill .3s; }
-.av--crest .cr-f1 .shell { transition: stroke .3s; stroke: var(--ico, var(--c)); }
+.av--crest .cr-ticks rect { fill: var(--ico, var(--cs)); transition: fill .3s; }
+.av--crest .cr-f1 .shell { transition: stroke .3s; stroke: var(--ico, var(--cs)); }
 .crest-icon {
   position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
-  color: var(--ico, var(--c)); transform-origin: 50% 50%; transition: color .3s, opacity .3s;
+  color: var(--ico, var(--cs)); transform-origin: 50% 50%; transition: color .3s, opacity .3s;
 }
-.crest-icon svg { width: 36%; height: 36%; stroke-width: 1.6; filter: drop-shadow(0 0 4px color-mix(in oklab, var(--c) 50%, transparent)); }
+.crest-icon svg { width: 36%; height: 36%; stroke-width: 1.6; filter: drop-shadow(0 0 4px color-mix(in oklab, var(--cs) 50%, transparent)); }
 
 .av--crest[data-mood="agree"] .cr-f2 { animation: crest-beat 1.5s var(--ease) infinite; }
 .av--crest[data-mood="skeptical"] { --spin: 90s; }

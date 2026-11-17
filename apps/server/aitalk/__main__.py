@@ -12,6 +12,7 @@ import webbrowser
 
 import uvicorn
 
+from . import console, providers
 from .config import ROOT, WEB_DIST, lan_addresses, settings
 
 
@@ -37,23 +38,19 @@ def ensure_web_built() -> None:
 
 
 def main() -> None:
+    console.setup("AI-Talk")
     if "--no-build" not in sys.argv:
         ensure_web_built()
     host = settings.host
     port = settings.port
     shared = host not in ("127.0.0.1", "localhost", "::1")
-    print(f"\nAI-Talk  (AI: {settings.provider})")
-    print(f"  이 PC에서:   http://127.0.0.1:{port}")
+    name = providers.active_name()
+    provider = providers.build(name)
+    console.banner(provider=providers.LABELS[name], model=provider.default_model, ready=provider.status()["ready"],
+                   port=port, addresses=lan_addresses() if shared else [], shared=shared,
+                   code=bool(settings.get("AITALK_ACCESS_CODE")))
     if shared:
-        for ip in lan_addresses():
-            print(f"  다른 PC에서: http://{ip}:{port}")
-        if settings.get("AITALK_ACCESS_CODE"):
-            print("  다른 PC에서 접속하면 접속 코드를 묻습니다 (.env의 AITALK_ACCESS_CODE).")
-        else:
-            print("  주의: 접속 코드가 없습니다. 같은 망의 누구나 이 주소로 들어와 내 AI 키로 토론을 돌릴 수 있습니다.")
-            print("        .env에 AITALK_ACCESS_CODE=원하는코드 를 넣으면 코드를 아는 사람만 들어옵니다.")
-        print("  처음 켤 때 Windows 방화벽이 물으면 '액세스 허용'을 눌러야 다른 PC에서 들어올 수 있습니다.")
-    print("  끄려면 이 창에서 Ctrl+C를 누르세요.\n")
+        console.say("처음 켤 때 Windows 방화벽이 물으면 '액세스 허용'을 눌러야 다른 PC에서 들어올 수 있습니다.", console.MUTED, mark="i")
     if "--open" in sys.argv:
         threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
     uvicorn.run("aitalk.app:app", host=host, port=port, log_level="warning")

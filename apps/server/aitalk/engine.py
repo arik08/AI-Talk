@@ -124,12 +124,13 @@ class Debate:
         self.usage_by: dict[str, Usage] = {}
         self.calls: dict[str, int] = {}                # 누구를 위한 호출이 몇 번 있었나 ("director"는 연출자)
         # 비용(달러)을 항목별로 쌓는다: 토큰, 웹 검색, 토론 전의 참가자 생성. 회의록 비용은 나중에 더해진다
-        self.cost_parts: dict[str, float] = {"tokens": 0.0, "search": 0.0,
+        self.cost_parts: dict[str, float] = {"tokens": 0.0, "search": 0.0, "minutes": 0.0,
                                              "prep": max(0.0, min(float(config.get("prep_cost") or 0), 50.0))}
         self.pricing = {"usd_krw": settings.usd_krw, "search_usd": settings.search_usd}
         self.cost = self.cost_parts["prep"]
         self.prices: dict[str, Optional[dict]] = {}
-        self.summary: Optional[dict] = None
+        self.summary: Optional[dict] = None      # 예전 버전의 요약 카드. 지금은 회의록이 그 자리를 맡는다
+        self.minutes: Optional[dict] = None
         self._pos = 0
         self._cut: Optional[int] = None
         self._plan_task: Optional[asyncio.Task] = None
@@ -250,7 +251,7 @@ class Debate:
                 "cost_parts": {k: round(v, 5) for k, v in self.cost_parts.items()},
                 "usage": self.usage.to_dict(), "calls": dict(self.calls),
                 "judge_fallbacks": getattr(self.provider, "judge_fallbacks", 0), "briefing": self.briefing,
-                "speeches": self.speeches, "summary": self.summary,
+                "speeches": self.speeches, "summary": self.summary, "minutes": self.minutes,
                 "context": self.ctx.snapshot() if self.ctx else {}, "events": self.events}
 
     async def _prepare(self) -> None:
@@ -461,11 +462,11 @@ class Debate:
         gen.task = asyncio.create_task(work())
         return gen
 
-    def _account(self, who: str, usage: Usage, model: str) -> None:
+    def _account(self, who: str, usage: Usage, model: str, part: str = "tokens") -> None:
         self.usage.add(usage)
         self.usage_by.setdefault(who, Usage()).add(usage)
         self.calls[who] = self.calls.get(who, 0) + 1
-        self.cost_parts["tokens"] += usage.cost(self.prices.get(model))
+        self.cost_parts[part] += usage.cost(self.prices.get(model))
         self.cost_parts["search"] += usage.searches * self.pricing["search_usd"]
         self.cost = sum(self.cost_parts.values())
         total = self.usage.total_input
@@ -557,6 +558,7 @@ class Debate:
         final = shown + " —" if cut else shown
         speech = gen.speech or Speech()
         seconds = len(shown) / SPEECH_CPS + GAPS.get(turn.kind, 1.0)
+        started_at = round(self.clock)   # 이 발언이 시작된 토론 시계. 회의록의 시간대별 정리에 쓴다
         self.clock += seconds
         self.last_spoke[speaker["id"]] = sid
         self.last_speaker = speaker
@@ -565,7 +567,8 @@ class Debate:
         self.speeches.append({"id": sid, "speaker": speaker["id"], "name": speaker["name"], "text": final,
                               "kind": turn.kind, "intent": turn.intent, "target": turn.target,
                               "mood": turn.mood, "cut": cut, "interject": turn.interject,
-                              "sources": speech.sources, "model": speech.model})
+                              "sources": speech.sources, "model": speech.model,
+                              "at": started_at, "phase": turn.phase})
         self.emit("speech_end", id=sid, speaker=speaker["id"], text=final, cut=cut, failed=False,
                   sources=speech.sources, thinking=speech.thinking.strip(), usage=speech.usage.to_dict(),
                   model=speech.model)
@@ -813,21 +816,24 @@ class Debate:
 
     # ------------------------------------------------------------------ 끝난 뒤
     async def _summarize(self) -> None:
+        """토론이 끝나면 회의록을 쓴다: 전체 흐름, 시간대별 정리, 쟁점별 발언, 합의와 미결."""
         if not self.cfg.get("summary", True) or len(self.speeches) < 3:
             return
-        transcript = "\n".join(f"【{s['name']}】 {s['text']}" for s in self.speeches)
+        model, effort = self.cfg["model"], self.cfg["effort"]
         try:
             self.emit("summarizing")
             try:   # 토론에 쓰던 문맥(캐시)을 그대로 이어 쓴다. 기록을 처음부터 다시 보내지 않는다
-                data, usage = await self.ctx.judge(
-                    question=prompts.SUMMARY_TAIL, schema=prompts.summary_schema(),
-                    model=self.cfg["model"], effort=self.cfg["effort"])
-            except Exception:  # noqa: BLE001 - 안 되면 기록을 통째로 보내는 예전 방식으로
+                data, usage = await self.ctx.judge(question=prompts.minutes_tail(self.speeches),
+                                                   schema=prompts.minutes_schema(), model=model, effort=effort)
+            except Exception:  # noqa: BLE001 - 안 되면 기록을 통째로 보내는 방식으로
+                people = [f"{p['name']}({p.get('title', '')})" for p in self.people]
                 data, usage = await self.provider.generate_json(
-                    system=prompts.SUMMARY_SYSTEM, prompt=prompts.summary_prompt(self.cfg["topic"], transcript),
-                    schema=prompts.summary_schema(), model=self.cfg["model"], effort=self.cfg["effort"])
-            self._account("director", usage, self.cfg["model"])
-            self.summary = data
-            self.emit("summary", **data)
-        except Exception as exc:  # noqa: BLE001 - 요약이 안 되어도 토론 기록은 남는다
-            self.emit("notice", kind="warn", text=f"요약 카드를 만들지 못했습니다. ({exc})")
+                    system=prompts.MINUTES_SYSTEM,
+                    prompt=prompts.minutes_prompt(self.cfg["topic"], (["진행자"] if self.mod else []) + people, self.speeches),
+                    schema=prompts.minutes_schema(), model=model, effort=effort)
+            self._account("minutes", usage, model, part="minutes")
+            prompts.stamp_timeline(data, self.speeches, self.clock)
+            self.minutes = {**data, "model": model, "written": dt.datetime.now().isoformat(timespec="seconds")}
+            self.emit("minutes", minutes=self.minutes)
+        except Exception as exc:  # noqa: BLE001 - 회의록이 안 되어도 토론 기록은 남는다
+            self.emit("notice", kind="warn", text=f"회의록을 쓰지 못했습니다. 아래의 '회의록 쓰기'로 다시 시도할 수 있습니다. ({exc})")

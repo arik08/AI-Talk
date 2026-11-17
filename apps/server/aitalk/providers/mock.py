@@ -157,7 +157,7 @@ class MockContext(Context):
     async def judge(self, *, question: str, schema: dict, model: str,
                     effort: str) -> tuple[dict, Usage]:
         self.p.calls.append(("judge", "", self.head))
-        if "headline" in schema.get("properties", {}):   # 끝난 뒤의 요약 카드
+        if {"headline", "agenda"} & set(schema.get("properties", {})):   # 끝난 뒤의 회의록
             return await self.p.generate_json(system="", prompt="", schema=schema, model=model, effort=effort)
         await asyncio.sleep(self.p.latency)
         names_m = re.search(r"참가자: (.+)", question)
@@ -254,6 +254,9 @@ class MockProvider(Provider):
             people = [n.strip() for n in names.group(1).split(",")] if names else ["참가자"]
             return {
                 "title": "시험용 회의록", "overview": "비용과 속도를 두고 논의함. 방향에는 동의했으나 방법에서 갈림.",
+                "timeline": [
+                    {"turns": "#1~#5", "time": "00:00~02:00", "phase": "모두발언", "summary": "각자 입장을 밝힘.", "issues": ["비용 부담"]},
+                    {"turns": "#6~", "time": "02:00~", "phase": "자유토론", "summary": "속도를 두고 맞섬.", "issues": ["시행 속도"]}],
                 "agenda": ["전환의 속도", "비용 부담"],
                 "discussions": [{"topic": "전환의 속도", "points": [
                     {"name": n, "point": "자신의 입장을 밝히고 상대 주장에 반박함"} for n in people[:4]]}],

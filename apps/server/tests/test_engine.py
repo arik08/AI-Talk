@@ -52,7 +52,10 @@ def test_full_debate_runs_through_all_phases(monkeypatch):
     # 자유토론에서는 같은 사람이 연달아 말하지 않는다
     free = [s["speaker"] for s in debate.speeches if s["kind"] == "free"]
     assert all(a != b for a, b in zip(free, free[1:]))
-    assert saved["summary"]["headline"]
+    assert saved["minutes"]["title"] and saved["minutes"]["timeline"]   # 끝나면 회의록이 자동으로 쓰인다
+    assert saved["cost_parts"]["minutes"] > 0
+    assert all("at" in s and "phase" in s for s in saved["speeches"])   # 발언마다 시작 시각이 남는다
+    assert [s["at"] for s in saved["speeches"]] == sorted(s["at"] for s in saved["speeches"])
     assert any(e["type"] == "director" for e in debate.events)
     # 진행자가 연달아 두 번 나서지 않는다
     speakers = [s["speaker"] for s in debate.speeches]

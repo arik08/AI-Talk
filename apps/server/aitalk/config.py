@@ -46,14 +46,14 @@ class Settings:
 
     @property
     def provider(self) -> str:
-        # AITALK_FORCE_PROVIDER는 시험할 때만 쓴다 (.env를 건드리지 않고 mock으로 띄우기)
-        forced = os.environ.get("AITALK_FORCE_PROVIDER", "")
-        return (forced or self.get("AITALK_PROVIDER", "mock")).lower()
+        """.env가 정한 기본 AI. 화면에서 바꾼 선택이 있으면 그것이 우선한다 (providers.active_name)."""
+        return self.get("AITALK_PROVIDER", "mock").lower()
 
 
     @property
     def host(self) -> str:
-        return self.get("AITALK_HOST", "127.0.0.1")
+        # 같은 망의 다른 PC에서도 늘 들어올 수 있게 한다. 이 PC에서만 쓰려면 .env에 AITALK_HOST=127.0.0.1
+        return self.get("AITALK_HOST", "0.0.0.0")
 
     @property
     def port(self) -> int:

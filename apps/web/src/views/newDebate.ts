@@ -1,5 +1,5 @@
 import {
-  ChevronRight, Drama, FileText, Globe, Library, RotateCcw, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Upload,
+  ChevronRight, ClipboardPaste, Drama, FileText, Globe, Library, RotateCcw, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Upload,
 } from 'lucide';
 import { api } from '../api';
 import { AVATAR_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
@@ -166,6 +166,19 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     }
     fileInput.value = '';
   });
+  /* 긴 글을 그대로 붙여 넣어 자료로 쓴다 (파일로 만들 필요 없이) */
+  const pasteInput = h('textarea', { class: 'textarea paste-input', rows: 1, placeholder: '또는 긴 글을 여기에 붙여 넣기' });
+  const addPaste = () => {
+    const text = pasteInput.value.trim();
+    if (!text) { pasteInput.focus(); return; }
+    const hangul = (text.match(/[가-힣]/g) ?? []).length;
+    const head = text.replace(/\s+/g, ' ').slice(0, 24);
+    draft.materials.push({ name: `붙여 넣은 글: ${head}${text.length > 24 ? '…' : ''}`, text, chars: text.length,
+      tokens: hangul + Math.round((text.length - hangul) / 4) });
+    pasteInput.value = '';
+    paintMaterials();
+  };
+
   function paintMaterials(): void {
     clear(matList);
     draft.materials.forEach((m, i) => matList.append(h('div', { class: 'mat-item' }, icon(FileText, 18),
@@ -178,10 +191,11 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       deleteButton(() => { draft.urls.splice(i, 1); paintMaterials(); }))));
   }
   page.append(h('section', { class: 'block' },
-    h('h2', { class: 'block-title' }, '자료', h('small', null, '선택. 문서를 올리거나 웹 주소를 붙이면 그것을 놓고 토론합니다')),
+    h('h2', { class: 'block-title' }, '자료', h('small', null, '선택. 문서를 올리거나, 웹 주소를 붙이거나, 글을 붙여 넣으면 그것을 놓고 토론합니다')),
     h('div', { class: 'mat-row' },
       h('button', { type: 'button', class: 'btn', onclick: () => fileInput.click() }, icon(Upload, 18), '문서 올리기'), fileInput,
-      urlInput, h('button', { type: 'button', class: 'btn', onclick: addUrl }, icon(Plus, 18), '주소 추가')),
+      urlInput, h('button', { type: 'button', class: 'btn', onclick: addUrl }, icon(Plus, 18), '주소 추가'),
+      pasteInput, h('button', { type: 'button', class: 'btn', onclick: addPaste }, icon(ClipboardPaste, 18), '글 추가')),
     matList));
   paintMaterials();
 
@@ -451,7 +465,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         field('발언당 검색 횟수', h('div', { class: 'inline-num' }, searches, h('span', { class: 'muted' }, '회'))),
         field('모델 배지', seg([['on', '보이기'], ['off', '숨기기'], ['blind', '블라인드']], () => draft.badge, (v) => { draft.badge = v; }),
           '블라인드: 토론이 끝난 뒤에 모델을 공개합니다'),
-        field('끝난 뒤', toggle('요약 카드 만들기', () => draft.summary, (v) => { draft.summary = v; })),
+        field('끝난 뒤', toggle('회의록 쓰기', () => draft.summary, (v) => { draft.summary = v; }),
+          '전체 흐름, 시간대별 정리, 쟁점별 발언, 합의와 미결을 정리합니다'),
         field('아바타 반응', toggle('모든 발언에 반응하기', () => draft.reactions === 'all', (v) => { draft.reactions = v ? 'all' : 'smart'; }),
           '끄면 개회와 마무리 발언에서는 반응을 따로 계산하지 않아 AI 호출이 줄어듭니다'),
         field('숨은 속내', toggle('참가자의 드러내지 않는 속내 쓰기', () => hidden, (v) => { draft.hiddenAgenda = v; }),

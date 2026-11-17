@@ -52,3 +52,15 @@ def test_auto_length_is_decided_per_turn_by_the_director():
     assert "발언 길이는 호출마다" in auto and "발언 길이의 기본은" not in auto
     assert "발언 길이의 기본은 1~2문장" in fixed
     assert "length" in auto and "length" in prompts.director_schema()["properties"]["participants"]["items"]["required"]
+
+
+def test_timeline_times_come_from_turn_numbers():
+    speeches = [{"id": i, "at": (i - 1) * 30} for i in range(1, 9)]          # 30초마다 한 발언
+    minutes = {"timeline": [
+        {"turns": "#1~#3", "time": "00:00~09:99", "phase": "", "summary": "", "issues": []},   # 모델이 틀리게 적은 시각
+        {"turns": "#4~#8", "time": "01:00~02:00", "phase": "", "summary": "", "issues": []},
+        {"turns": "알 수 없음", "time": "그대로", "phase": "", "summary": "", "issues": []}]}
+    out = prompts.stamp_timeline(minutes, speeches, total_seconds=250)["timeline"]
+    assert out[0]["time"] == "00:00~01:30" and out[0]["turns"] == "#1~#3"
+    assert out[1]["time"] == "01:30~04:10"            # 앞 구간의 끝에서 시작해 토론의 끝까지
+    assert out[2]["time"] == "그대로"                 # 턴 번호를 못 읽으면 건드리지 않는다

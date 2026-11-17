@@ -39,6 +39,7 @@ export interface Status {
   defaults: { model: string; effort: string; compact_threshold: number; hidden_agenda: boolean };
   network?: { shared: boolean; port: number; addresses: string[]; code: boolean };
   pricing?: Pricing;
+  providers?: { name: string; label: string; ready: boolean; message: string; active: boolean }[];
 }
 
 export interface Pricing { usd_krw: number; search_usd: number }
