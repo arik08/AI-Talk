@@ -456,9 +456,11 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .tl-what ul { margin: .375rem 0 0; padding-left: 1.125rem; color: var(--muted); font-size: .9375rem; }
 .paste-input { flex: 1 1 16rem; min-width: 12rem; min-height: 2.5rem; height: 2.5rem; max-height: 8rem; line-height: 1.5; }
 .costcard h2 { display: flex; align-items: baseline; gap: .875rem; font-size: 1.75rem; font-variant-numeric: tabular-nums; }
-.cost-rows { margin: 1rem 0 .875rem; border-top: 1px solid var(--line); }
-.cost-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: .5rem 0; border-bottom: 1px solid var(--line); }
-.cost-row small { display: block; color: var(--dim); font-size: .8125rem; }
+/* 내역은 한 줄에 두 칸씩. 항목 하나는 이름, 설명, 금액이 한 줄에 놓인다. 좁으면 한 칸으로 내려간다 */
+.cost-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: 0 2.5rem; margin: .875rem 0 .75rem; border-top: 1px solid var(--line); }
+.cost-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: .5rem 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.cost-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cost-row small { margin-left: .625rem; color: var(--dim); font-size: .8125rem; }
 .cost-row b { font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .minutes-tag { display: inline-flex; align-items: center; gap: .375rem; margin-bottom: .5rem; color: var(--gold); font-size: .875rem; letter-spacing: .08em; }
 .minutes-over { margin-top: .5rem; color: var(--muted); }
