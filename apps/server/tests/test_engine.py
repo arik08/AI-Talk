@@ -54,6 +54,15 @@ def test_full_debate_runs_through_all_phases(monkeypatch):
     assert all(a != b for a, b in zip(free, free[1:]))
     assert saved["summary"]["headline"]
     assert any(e["type"] == "director" for e in debate.events)
+    # 진행자가 연달아 두 번 나서지 않는다
+    speakers = [s["speaker"] for s in debate.speeches]
+    assert not any(a == b == MOD_ID for a, b in zip(speakers, speakers[1:]))
+    # 개회와 마무리 발언에서는 아바타 반응만을 위한 연출자 호출을 하지 않는다
+    judges = sum(1 for kind, *_ in debate.provider.calls if kind == "judge")
+    needed = sum(1 for s in debate.speeches if s["kind"] in ("statement", "free", "moderate"))
+    closing = sum(1 for s in debate.speeches if s["kind"] in ("open", "closing", "wrap"))
+    assert closing >= 6
+    assert judges <= needed + 1   # +1은 끝난 뒤의 요약 카드. 개회·마무리 발언만큼은 호출이 없어야 한다
 
 
 def test_every_started_speech_is_in_the_context_exactly_once(monkeypatch):
@@ -101,7 +110,7 @@ def test_audience_question_discards_pregenerated_speech(monkeypatch):
 
 
 def test_interjection_cuts_the_previous_speech(monkeypatch):
-    cfg = _config(speed="fast", gap_scale=0.1, max_turns=40, moderator=False)
+    cfg = _config(speed="fast", gap_scale=0.1, max_turns=28, moderator=False)
     debate = None
 
     def force_high_urge(real):
@@ -126,6 +135,7 @@ def test_interjection_cuts_the_previous_speech(monkeypatch):
         await asyncio.wait_for(debate.task, timeout=120)
 
     asyncio.run(go())
+    assert debate.state == "ended"   # 시간 안에 끝나지 못해 중단된 것을 다른 실패로 착각하지 않게
     cut = [s for s in debate.speeches if s["cut"]]
     assert cut, "끼어들기로 끊긴 발언이 하나는 있어야 한다"
     assert all(s["text"].endswith("—") for s in cut)

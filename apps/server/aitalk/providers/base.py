@@ -158,6 +158,19 @@ def parse_json(text: str) -> dict:
         raise ProviderError("모델이 정해진 형식(JSON)으로 답하지 않았습니다.")
 
 
+def fits(data: object, schema: dict) -> bool:
+    """틀을 걸지 않고 받은 JSON이 쓸 만한지 본다: 필수 항목이 있고, 목록은 목록인지."""
+    if not isinstance(data, dict):
+        return False
+    props = schema.get("properties", {})
+    for key in schema.get("required", []):
+        if key not in data:
+            return False
+        if props.get(key, {}).get("type") == "array" and not isinstance(data[key], list):
+            return False
+    return True
+
+
 def clean_utterance(text: str, speaker: str = "") -> str:
     """발언 앞에 붙은 이름표나 따옴표를 떼어 낸다."""
     out = text.strip()

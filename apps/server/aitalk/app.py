@@ -228,6 +228,7 @@ class DebateIn(BaseModel):
     badge: str = "on"
     language: str = "ko"
     summary: bool = True
+    reactions: str = "smart"
     hidden_agenda: Optional[bool] = None
     compact_threshold: Optional[int] = None
 
@@ -261,7 +262,16 @@ async def debate_start(body: DebateIn) -> dict:
     debate = Debate(store.new_id("d"), cfg, provider)
     LIVE[debate.id] = debate
     debate.task = asyncio.create_task(debate.run())
+    debate.task.add_done_callback(lambda _task, key=debate.id: _retire(key))
     return {"id": debate.id}
+
+
+def _retire(debate_id: str) -> None:
+    """끝난 토론은 저장소에 있으므로 잠시 뒤 메모리에서 내보낸다. 서버를 오래 켜 두어도 쌓이지 않는다."""
+    try:
+        asyncio.get_running_loop().call_later(300, LIVE.pop, debate_id, None)
+    except RuntimeError:
+        LIVE.pop(debate_id, None)
 
 
 @app.get("/api/debates")

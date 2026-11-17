@@ -93,7 +93,13 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
           h('span', null, '캐시에서 읽은 입력'), h('span', null, `${t.cached.toLocaleString()} 토큰`),
           h('span', null, '캐시에 쓴 입력'), h('span', null, `${t.cache_write.toLocaleString()} 토큰`),
           h('span', null, '출력'), h('span', null, `${t.output.toLocaleString()} 토큰`),
-          h('span', null, '예상 비용'), h('span', null, `$${Number(usage.cost ?? 0).toFixed(4)}`)),
+          h('span', null, '예상 비용'), h('span', null, `$${Number(usage.cost ?? 0).toFixed(4)}`),
+          h('span', null, 'AI 호출'), h('span', null, (() => {
+            const calls = usage.calls ?? {};
+            const director = calls.director ?? 0;
+            const total = Object.values(calls).reduce((a: number, b: any) => a + Number(b), 0);
+            return `발언 ${total - director}번 · 연출자 ${director}번`;
+          })())),
         h('h4', { style: 'margin-top:1.25rem' }, '화자별 출력'),
         h('div', { class: 'kv' }, Object.entries(usage.by ?? {}).flatMap(([who, u]: [string, any]) => [
           h('span', null, who === 'director' ? '연출자(안 보임)' : seats.get(who)?.persona.name ?? who),
@@ -369,6 +375,9 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       case 'phase':
         phaseChip.querySelector('span')!.textContent = ev.label;
         addPhase(ev.label);
+        if (ev.phase === 'closing') {   // 마무리 발언에서는 차례가 정해져 있으므로 발언 의지와 감정을 가라앉힌다
+          seats.forEach((s) => { setAvatar(s.av, { mood: 'calm', wants: false }); s.urge.style.width = '0%'; s.tile.classList.remove('is-hot'); });
+        }
         break;
       case 'research':
         if (ev.status === 'start') { addNotice('search', `진행자가 자료를 조사합니다: ${ev.url}`); setStatus('moderator', Search, '조사 중'); const m = seats.get('moderator'); if (m) setAvatar(m.av, { state: 'searching' }); }

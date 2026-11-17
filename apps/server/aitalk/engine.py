@@ -113,6 +113,7 @@ class Debate:
         self._shown = asyncio.Event()                  # 지금 화면에 나오고 있는 발언이 없으면 켜져 있다
         self._shown.set()
         self.auto_paused = False
+        self._showing_mod = False
         self._away_task: Optional[asyncio.Task] = None
 
         self.ctx = None
@@ -120,6 +121,7 @@ class Debate:
         self.speeches: list[dict] = []
         self.usage = Usage()
         self.usage_by: dict[str, Usage] = {}
+        self.calls: dict[str, int] = {}                # 누구를 위한 호출이 몇 번 있었나 ("director"는 연출자)
         self.cost = 0.0
         self.prices: dict[str, Optional[dict]] = {}
         self.summary: Optional[dict] = None
@@ -240,7 +242,8 @@ class Debate:
     def record(self) -> dict:
         return {**self.public(), "state": self.state, "turns": self.turn_no,
                 "seconds": round(self.clock), "cost": round(self.cost, 4),
-                "usage": self.usage.to_dict(), "briefing": self.briefing,
+                "usage": self.usage.to_dict(), "calls": dict(self.calls),
+                "judge_fallbacks": getattr(self.provider, "judge_fallbacks", 0), "briefing": self.briefing,
                 "speeches": self.speeches, "summary": self.summary,
                 "context": self.ctx.snapshot() if self.ctx else {}, "events": self.events}
 
@@ -307,7 +310,6 @@ class Debate:
                     "statements", scripted=True))
 
     def _enter_closing(self) -> None:
-        self.phase_target = "closing"
         if self.mod:
             self.script.append(Turn(self.mod, "moderate",
                 "토론을 마무리할 시간입니다. 시간이 다 되었음을 알리고, 마지막 발언을 "
@@ -451,11 +453,12 @@ class Debate:
     def _account(self, who: str, usage: Usage, model: str) -> None:
         self.usage.add(usage)
         self.usage_by.setdefault(who, Usage()).add(usage)
+        self.calls[who] = self.calls.get(who, 0) + 1
         self.cost += usage.cost(self.prices.get(model))
         total = self.usage.total_input
         self.emit("usage", total=self.usage.to_dict(), cost=round(self.cost, 4),
                   cache_rate=round(self.usage.cached / total, 3) if total else 0,
-                  by={k: v.to_dict() for k, v in self.usage_by.items()})
+                  by={k: v.to_dict() for k, v in self.usage_by.items()}, calls=dict(self.calls))
 
     # ------------------------------------------------------------------ 보여 주기
     def _gap(self, turn: Turn) -> float:
@@ -494,6 +497,7 @@ class Debate:
         self._cut = None
         self._pos = 0
         self._shown.clear()
+        self._showing_mod = speaker["id"] == MOD_ID
         self._plan_task = asyncio.create_task(self._after_gen(gen))
         sent_searches = 0
         cut = False
@@ -615,8 +619,9 @@ class Debate:
             return None
         free = (not self.script and not self._should_close(chars)
                 and self.cfg.get("mode") != "sequential")
-        if not free:   # 다음 발언자가 정해져 있다: 연출자는 감정만 정하고, 발언은 때맞춰 만든다
-            self._spawn(self._react(prev))
+        if not free:   # 다음 발언자가 정해져 있다: 발언은 때맞춰 만들고, 연출자는 감정만 정한다
+            if self._wants_reaction(prev):
+                self._spawn(self._react(prev))
             await self._hold_until(prev, lead=self._lead())
             return self._generate(self._next_scripted(chars))
         await self._hold_until(prev, progress=REACT_AT)
@@ -632,6 +637,18 @@ class Debate:
         await self._hold_until(prev, lead=self._lead())
         return self._generate(turn)
 
+    def _wants_reaction(self, prev: Gen) -> bool:
+        """다음 발언자가 이미 정해져 있을 때, 아바타 반응만을 위해 연출자를 부를지.
+
+        기본(smart)은 참가자의 모두발언과 순차 토론에서만 부른다. 개회와 마무리 발언에서는 부르지 않는다.
+        이 호출이 전체 호출의 3분의 1쯤이었기 때문이다.
+        """
+        if self.cfg.get("reactions", "smart") == "all":
+            return True
+        turn = prev.turn
+        return (turn.speaker["id"] != MOD_ID and turn.phase in ("statements", "free")
+                and not self.closing and not self._should_close(len(prev.text)))
+
     def _next_scripted(self, chars: int) -> Turn:
         if self.script:
             return self.script.popleft()
@@ -641,8 +658,8 @@ class Debate:
         return self._milestone(chars) or self._sequential_turn()
 
     def _milestone(self, chars: int) -> Optional[Turn]:
-        if not self.mod:
-            return None
+        if not self.mod or (self.last_speaker and self.last_speaker["id"] == MOD_ID) or self._showing_mod:
+            return None   # 진행자가 방금 말했으면 다음 기회로 미룬다 (연달아 두 번 나서지 않게)
         progress = self._progress(chars)
         if progress >= 0.5 and "half" not in self.milestones:
             self.milestones.add("half")
@@ -784,9 +801,14 @@ class Debate:
         transcript = "\n".join(f"【{s['name']}】 {s['text']}" for s in self.speeches)
         try:
             self.emit("summarizing")
-            data, usage = await self.provider.generate_json(
-                system=prompts.SUMMARY_SYSTEM, prompt=prompts.summary_prompt(self.cfg["topic"], transcript),
-                schema=prompts.summary_schema(), model=self.cfg["model"], effort=self.cfg["effort"])
+            try:   # 토론에 쓰던 문맥(캐시)을 그대로 이어 쓴다. 기록을 처음부터 다시 보내지 않는다
+                data, usage = await self.ctx.judge(
+                    question=prompts.SUMMARY_TAIL, schema=prompts.summary_schema(),
+                    model=self.cfg["model"], effort=self.cfg["effort"])
+            except Exception:  # noqa: BLE001 - 안 되면 기록을 통째로 보내는 예전 방식으로
+                data, usage = await self.provider.generate_json(
+                    system=prompts.SUMMARY_SYSTEM, prompt=prompts.summary_prompt(self.cfg["topic"], transcript),
+                    schema=prompts.summary_schema(), model=self.cfg["model"], effort=self.cfg["effort"])
             self._account("director", usage, self.cfg["model"])
             self.summary = data
             self.emit("summary", **data)

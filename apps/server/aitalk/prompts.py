@@ -74,6 +74,7 @@ def shared_context(cfg: dict, briefing: str) -> str:
             parts += [f"## 문서: {m.get('name', '자료')}", m.get("text", ""), ""]
         if briefing:
             parts += ["## 진행자의 사전 조사 브리핑", briefing, ""]
+    parts.append(director_section([p["name"] for p in cfg["participants"]]))
     return "\n".join(parts).strip()
 
 
@@ -93,23 +94,37 @@ def pgpt_directive(speaker: str, directive: str, private: str = "") -> str:
     return "\n".join(lines)
 
 
-def director_question(names: list[str], last_speaker: str) -> str:
-    return f"""━━ 지금 할 일 (연출자) ━━
-당신은 이 토론의 보이지 않는 연출자입니다. 발언을 만들지 않습니다. 방금까지의 흐름을 보고 참가자 한 사람 한 사람이 지금 이 순간 어떤 상태인지 판단합니다.
+def director_section(names: list[str]) -> str:
+    """연출자 호출의 지침. 호출마다 똑같은 글이라 공통 앞부분에 넣어 캐시에 태운다.
+
+    예전에는 이 글(약 700토큰)을 호출마다 꼬리에 붙여 캐시 없이 보냈다.
+    """
+    return f"""# 연출자 호출
+가끔 '지금 할 일'이 발언이 아니라 연출자 호출일 때가 있습니다. 그때는 발언을 만들지 않습니다. 보이지 않는 연출자로서, 방금까지의 흐름을 보고 참가자 한 사람 한 사람이 지금 이 순간 어떤 상태인지 판단해 JSON 하나만 출력합니다.
 
 참가자: {', '.join(names)}
-방금 말한 사람: {last_speaker or '없음'}
 
-참가자마다 다음을 정하세요.
+참가자마다 정할 것
 - urge: 지금 말하고 싶은 정도, 0~10의 정수. 방금 자기 주장이 공격받았거나 질문을 받았으면 높습니다. 할 말을 이미 다 했거나 화제가 자기 분야에서 멀면 낮습니다. 모두에게 비슷한 점수를 주지 말고 차이를 분명히 하세요. 참을 수 없어 말을 끊고 싶을 정도일 때만 9 이상을 줍니다.
 - intent: 말한다면 하려는 것. rebut(반박), add(보충), ask(질문), agree(동의), shift(화제 전환) 가운데 하나.
 - target: 누구의 말에 반응하려는가. 참가자 이름 그대로. 없으면 빈 문자열.
 - mood: 방금 발언을 들은 지금의 감정. calm(평온), agree(수긍), skeptical(못마땅), heated(격앙), curious(궁금), surprised(놀람), amused(웃음), thinking(고민) 가운데 하나. 인물의 성격과 입장에 맞게, 사람마다 다르게.
 
-그리고 전체에 대해:
+전체에 대해 정할 것
 - addressed: 방금 발언이 특정 참가자에게 질문했거나 그 사람을 지목했다면 그 이름, 아니면 빈 문자열.
 - moderator_needed: 같은 주장이 되풀이되거나, 논점이 흐려졌거나, 감정이 지나치게 달아올라 진행자가 정리해야 하면 true.
-- moderator_reason: 그 이유를 한 문장으로. 없으면 빈 문자열."""
+- moderator_reason: 그 이유를 한 문장으로. 없으면 빈 문자열.
+
+출력 형식: 아래 모양의 JSON 하나만 씁니다. 앞뒤에 다른 글이나 코드 블록 표시를 붙이지 않고, 검색 도구도 쓰지 않습니다. participants에는 참가자 전원을 위의 순서대로 넣습니다.
+{{"participants":[{{"name":"이름","urge":5,"intent":"rebut","target":"상대 이름","mood":"calm"}}],"addressed":"","moderator_needed":false,"moderator_reason":""}}"""
+
+
+def director_question(names: list[str], last_speaker: str) -> str:
+    """연출자 호출의 꼬리. 지침은 공통 앞부분에 있으므로 여기는 짧다."""
+    return f"""━━ 지금 할 일 (연출자 호출) ━━
+참가자: {', '.join(names)}
+방금 말한 사람: {last_speaker or '없음'}
+'연출자 호출' 지침대로 판단해 JSON 하나만 출력하세요."""
 
 
 def director_schema() -> dict:
@@ -235,6 +250,15 @@ def summary_schema() -> dict:
         "required": ["headline", "consensus", "issues", "takeaway"],
         "additionalProperties": False,
     }
+
+
+SUMMARY_TAIL = """━━ 지금 할 일 (기록자 호출) ━━
+토론이 끝났습니다. 발언을 만들지 않습니다. 토론을 지켜본 기록자로서, 위 기록에 실제로 나온 말만 바탕으로 요약 카드를 JSON 하나로 출력합니다. 앞뒤에 다른 글이나 코드 블록 표시를 붙이지 않습니다.
+- headline: 이 토론을 한 줄로
+- consensus: 참가자들이 대체로 동의한 점의 목록 (없으면 빈 목록)
+- issues: 끝까지 갈린 쟁점 2~4개. 쟁점마다 issue(쟁점)와 positions(각 참가자의 name과 position 한 줄)
+- takeaway: 지켜본 사람이 가져갈 한 문장
+{"headline":"","consensus":[""],"issues":[{"issue":"","positions":[{"name":"","position":""}]}],"takeaway":""}"""
 
 
 def summary_prompt(topic: str, transcript: str) -> str:

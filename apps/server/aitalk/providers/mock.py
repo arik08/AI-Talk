@@ -80,6 +80,7 @@ class MockContext(Context):
         self.topic = (m.group(1) if m else "이 주제").strip()[:40]
         self.people: dict[str, dict] = {}
         for block in re.split(r"\n## ", shared)[1:]:
+            block = block.split("\n# ")[0]   # 인물 설명 뒤에 이어지는 다른 절(자료, 연출자 지침)은 뺀다
             name = block.split(" — ")[0].split("\n")[0].strip()
             claims = re.findall(r"^- (.+)$", block, re.MULTILINE)
             view = re.search(r"이 주제에서의 관점: (.+)", block)
@@ -156,6 +157,8 @@ class MockContext(Context):
     async def judge(self, *, question: str, schema: dict, model: str,
                     effort: str) -> tuple[dict, Usage]:
         self.p.calls.append(("judge", "", self.head))
+        if "headline" in schema.get("properties", {}):   # 끝난 뒤의 요약 카드
+            return await self.p.generate_json(system="", prompt="", schema=schema, model=model, effort=effort)
         await asyncio.sleep(self.p.latency)
         names_m = re.search(r"참가자: (.+)", question)
         names = [n.strip() for n in names_m.group(1).split(",")] if names_m else []
@@ -275,7 +278,8 @@ class MockProvider(Provider):
     async def research(self, *, prompt: str, model: str, effort: str, on_event: OnEvent) -> Speech:
         on_event("search", "시험용 검색어")
         await asyncio.sleep(self.latency * 2)
-        url = (re.search(r"https?://\S+", prompt) or [""])[0] if re.search(r"https?://\S+", prompt) else ""
+        found = re.search(r"https?://\S+", prompt)
+        url = found.group(0) if found else ""
         return Speech(
             text="요약: 시험용 브리핑입니다. 실제 조사는 Claude나 P-GPT에서 이루어집니다.\n"
                  "쟁점: 비용 부담, 시행 속도, 형평성",

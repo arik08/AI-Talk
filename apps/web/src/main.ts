@@ -1,9 +1,6 @@
 import '@fontsource/noto-sans-kr/400.css';
-import '@fontsource/noto-sans-kr/500.css';
 import '@fontsource/noto-sans-kr/600.css';
-import '@fontsource/noto-serif-kr/500.css';
 import '@fontsource/noto-serif-kr/600.css';
-import '@fontsource/noto-serif-kr/700.css';
 import '@fontsource/cinzel/700.css';
 import './styles/app.css';
 import './styles/avatar.css';

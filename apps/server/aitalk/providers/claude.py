@@ -14,7 +14,7 @@ import anthropic
 
 from .. import prompts
 from .base import (Context, ModelInfo, OnEvent, Provider, ProviderError, Speech, Usage,
-                   clean_utterance, parse_json)
+                   clean_utterance, fits, parse_json)
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
@@ -76,6 +76,7 @@ class ClaudeProvider(Provider):
         self.client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else None
         self.use_fallbacks = True   # 요청이 거절되면 다른 모델로 넘기는 설정. 안 받으면 끈다
         self.use_thinking = True
+        self.judge_fallbacks = 0    # 틀 없이 받은 JSON이 읽히지 않아 틀을 걸어 다시 부른 횟수
         self._models: Optional[list[ModelInfo]] = None
 
     def status(self) -> dict:
@@ -300,11 +301,30 @@ class ClaudeContext(Context):
 
     async def judge(self, *, question: str, schema: dict, model: str,
                     effort: str) -> tuple[dict, Usage]:
+        """곁가지 판단.
+
+        먼저 발언자 호출과 똑같은 앞부분(도구, system, 기록)으로 부르고 JSON 틀은 걸지 않는다.
+        틀을 걸면 요청 앞부분이 달라져 캐시를 따로 쓰게 되고, 발언마다 캐시를 두 번 쓰게 된다.
+        받은 글이 JSON으로 읽히지 않을 때만 틀을 걸어 한 번 더 부른다.
+        """
+        msg = await self.p._create(model=model, effort=effort, system=self._system(),
+                                   messages=self._messages(question), max_tokens=4000,
+                                   tools=self._tools(model))
+        usage = _usage(msg.usage)
+        text = "".join(b.text for b in msg.content if b.type == "text")
+        try:
+            data = parse_json(text)
+            if fits(data, schema):
+                return data, usage
+        except (ProviderError, ValueError):
+            pass
+        self.p.judge_fallbacks += 1
         msg = await self.p._create(model=model, effort=effort, system=self._system(),
                                    messages=self._messages(question), max_tokens=4000,
                                    schema=schema)
+        usage.add(_usage(msg.usage))
         text = next((b.text for b in msg.content if b.type == "text"), "")
-        return parse_json(text), _usage(msg.usage)
+        return parse_json(text), usage
 
     async def maybe_compact(self, model: str) -> bool:
         """기록이 기준을 넘으면 앞부분을 요약으로 바꾼다.

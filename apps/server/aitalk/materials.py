@@ -4,8 +4,6 @@ from __future__ import annotations
 import io
 import re
 
-SUPPORTED = (".pdf", ".docx", ".txt", ".md", ".markdown")
-
 
 class MaterialError(Exception):
     pass

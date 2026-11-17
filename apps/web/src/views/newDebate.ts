@@ -34,13 +34,14 @@ const draft = {
   perSpeaker: false,
   badge: 'on',
   summary: true,
+  reactions: 'smart',
   hiddenAgenda: null as boolean | null,
 };
 
 /* 진행 설정은 이 브라우저에 기억해 두고 다음에 그대로 쓴다. 주제, 자료, 참가자는 기억하지 않는다. */
 const SETTING_KEYS = ['count', 'policy', 'avatarSet', 'moderator', 'mode', 'turnsOn', 'maxTurns', 'minutesOn', 'maxMinutes',
   'length', 'speed', 'interjection', 'gapScale', 'search', 'maxSearches', 'model', 'effort', 'perSpeaker', 'badge', 'summary',
-  'hiddenAgenda'] as const;
+  'reactions', 'hiddenAgenda'] as const;
 const STORE_KEY = 'aitalk.settings.v1';
 const pick = (): Record<string, unknown> => Object.fromEntries(SETTING_KEYS.map((k) => [k, (draft as any)[k]]));
 const DEFAULTS = pick();
@@ -442,6 +443,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         field('모델 배지', seg([['on', '보이기'], ['off', '숨기기'], ['blind', '블라인드']], () => draft.badge, (v) => { draft.badge = v; }),
           '블라인드: 토론이 끝난 뒤에 모델을 공개합니다'),
         field('끝난 뒤', toggle('요약 카드 만들기', () => draft.summary, (v) => { draft.summary = v; })),
+        field('아바타 반응', toggle('모든 발언에 반응하기', () => draft.reactions === 'all', (v) => { draft.reactions = v ? 'all' : 'smart'; }),
+          '끄면 개회와 마무리 발언에서는 반응을 따로 계산하지 않아 AI 호출이 줄어듭니다'),
         field('숨은 속내', toggle('참가자의 드러내지 않는 속내 쓰기', () => hidden, (v) => { draft.hiddenAgenda = v; }),
           status?.provider === 'pgpt' ? 'P-GPT에서는 다른 참가자가 알아챌 수 있습니다' : ''))),
     status?.provider === 'pgpt' ? h('div', { class: 'banner banner--info', style: 'margin-top:1.5rem' },
@@ -486,7 +489,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         max_turns: draft.turnsOn ? draft.maxTurns : null, max_minutes: draft.minutesOn ? draft.maxMinutes : null,
         length: draft.length, interjection: draft.interjection, speed: draft.speed, gap_scale: draft.gapScale,
         search: draft.search, max_searches: draft.maxSearches, model: draft.model || null, effort: draft.effort || null,
-        badge: draft.badge, summary: draft.summary, hidden_agenda: draft.hiddenAgenda,
+        badge: draft.badge, summary: draft.summary, reactions: draft.reactions, hidden_agenda: draft.hiddenAgenda,
       });
       ctx.go(`#/stage/${id}`);
     } catch (err) {

@@ -183,7 +183,7 @@ export function setAvatar(el: HTMLElement, patch: { state?: AvatarState; mood?: 
   const node = state === 'searching' ? Search
     : (state !== 'speaking' && el.dataset.wants === '1') ? Hand
     : MOOD_ICON[el.dataset.mood as Mood];
-  const key = node ? String(CREST_KEY.get(node) ?? keyOf(node)) : '';
+  const key = node ? String(iconKey(node)) : '';
   if (badge.dataset.key === key) return;
   badge.dataset.key = key;
   clear(badge);
@@ -191,12 +191,11 @@ export function setAvatar(el: HTMLElement, patch: { state?: AvatarState; mood?: 
   badge.classList.toggle('is-on', !!node);
 }
 
-const CREST_KEY = new Map<IconNode, number>();
-let keySeq = 0;
-function keyOf(node: IconNode): number {
-  keySeq += 1;
-  CREST_KEY.set(node, keySeq);
-  return keySeq;
+/* 같은 아이콘을 다시 그리지 않으려고 아이콘마다 번호를 매겨 둔다 */
+const iconKeys = new Map<IconNode, number>();
+function iconKey(node: IconNode): number {
+  if (!iconKeys.has(node)) iconKeys.set(node, iconKeys.size + 1);
+  return iconKeys.get(node)!;
 }
 
 /** 참가자 수만큼 서로 다른 아바타를 고른다. */

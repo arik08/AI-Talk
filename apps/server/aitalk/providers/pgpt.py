@@ -17,7 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .. import prompts
 from .base import (Context, ModelInfo, OnEvent, Provider, ProviderError, Speech, Usage,
-                   clean_utterance, parse_json)
+                   clean_utterance, fits, parse_json)
 
 DEFAULT_BASE_URL = "http://pgpt.posco.com/s0la01-gpt/v1"
 COMPANY_CODE = "30"
@@ -305,12 +305,22 @@ class PgptContext(Context):
 
     async def judge(self, *, question: str, schema: dict, model: str,
                     effort: str) -> tuple[dict, Usage]:
+        # 먼저 발언자 호출과 같은 설정으로 부른다(출력 형식을 바꾸면 캐시가 깨진다). 안 읽히면 틀을 걸어 다시.
+        speech, _ = await self._call(lambda *_: None, question, model=model, effort=effort, store=False)
+        usage = speech.usage
+        try:
+            data = parse_json(speech.text)
+            if fits(data, schema):
+                return data, usage
+        except (ProviderError, ValueError):
+            pass
         tail = question
         if not self.p.use_schema:
             tail += "\n\n다음 JSON 형식으로만 답하세요:\n" + json.dumps(schema, ensure_ascii=False)
         speech, _ = await self._call(lambda *_: None, tail, model=model, effort=effort,
                                      store=False, schema=schema)
-        return parse_json(speech.text), speech.usage
+        usage.add(speech.usage)
+        return parse_json(speech.text), usage
 
     def snapshot(self) -> dict:
         return {"head": self.head, "compaction": self.p.use_compaction}
