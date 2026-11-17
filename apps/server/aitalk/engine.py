@@ -96,6 +96,7 @@ class Debate:
         self.skip = False
         self.finish = False
         self.pending: deque[dict] = deque()
+        self.orders: list[dict] = []          # 주최자의 지시 가운데 아직 따르지 않은 참가자가 남은 것
 
         self.phase = "prepare"
         self.script: deque[Turn] = deque()
@@ -184,6 +185,8 @@ class Debate:
         elif action in ("instruct", "question") and str(value or "").strip():
             self.pending.append({"kind": action, "text": str(value).strip()[:500]})
             self.emit("notice", kind=action, text=str(value).strip()[:500])
+            if self.state == "paused":   # 멈춰 둔 채로 보냈으면 바로 이어 가서 반영한다
+                self.control("resume")
         elif action == "abort" and self.task and not self.task.done():
             self.task.cancel()
 
@@ -382,7 +385,12 @@ class Debate:
             gen = await self._plan_task if self._plan_task else None
 
     def _apply_pending(self, gen: Gen) -> Gen:
-        """관람자가 개입했으면 미리 만들어 둔 발언을 버리고 그 요청부터 처리한다."""
+        """보는 사람이 개입했으면 미리 만들어 둔 발언을 버리고 그것부터 처리한다.
+
+        진행 요청(instruct): 참고 사항이 아니라 주최자의 지시다. 기록에 【주최자 지시】로 남기고, 진행자가 그대로
+          전하며 자신부터 따르고, 참가자는 각자 다음 발언에서 반드시 수행한다(아직 따르지 않은 사람을 orders가 기억한다).
+        청중 질문(question): 진행자가 질문을 받아 가장 잘 답할 참가자에게 묻는다. 전원이 따라야 하는 것은 아니다.
+        """
         if not self.pending:
             return gen
         item = self.pending.popleft()
@@ -395,22 +403,35 @@ class Debate:
         if item["kind"] == "question":
             self.ctx.add_note("청중", f"(청중 질문) {text}")
             if self.mod:
-                turn = Turn(self.mod, "moderate",
-                            f"청중에게서 질문이 들어왔습니다: \"{text}\" 이 질문을 소개하고, 가장 잘 답할 참가자 한 명을 지목해 답을 청하세요. 2~3문장.",
-                            phase)
-            else:
-                who = max(self.people, key=lambda p: self.turn_no - self.last_spoke.get(p["id"], 0))
-                turn = Turn(who, "answer", f"청중 질문 \"{text}\"에 자신의 입장에서 답하세요. {self._len()}", phase,
-                            intent="answer")
+                return self._generate(Turn(
+                    self.mod, "moderate",
+                    f"청중에게서 질문이 들어왔습니다: \"{text}\" 질문을 평가하거나 물리치지 말고 그대로 소개한 뒤, "
+                    "가장 잘 답할 참가자 한 명을 지목해 답을 청하세요. 2~3문장.", phase))
+            who = max(self.people, key=lambda p: self.turn_no - self.last_spoke.get(p["id"], 0))
+            return self._generate(Turn(who, "answer", f"청중 질문 \"{text}\"에 자신의 입장에서 답하세요. {self._len()}",
+                                       phase, intent="answer"))
+        self.ctx.add_note(prompts.ORDER_SPEAKER, text)
+        order = {"text": text, "todo": {p["id"] for p in self.people}}
+        self.orders.append(order)
+        if self.mod:
+            turn = Turn(self.mod, "moderate", prompts.order_relay(text), phase)
         else:
-            if self.mod:
-                turn = Turn(self.mod, "moderate",
-                            f"제작진의 요청입니다: \"{text}\" 이 요청을 자연스럽게 반영해 토론을 이끄세요. 2~3문장.", phase)
-            else:
-                self.ctx.add_note("진행 안내", text)
-                who = max(self.people, key=lambda p: self.turn_no - self.last_spoke.get(p["id"], 0))
-                turn = Turn(who, "free", f"방금 진행 안내에 따라 발언을 이어가세요. {self._len()}", phase, intent="shift")
+            who = max(self.people, key=lambda p: self.turn_no - self.last_spoke.get(p["id"], 0))
+            order["todo"].discard(who["id"])
+            turn = Turn(who, "answer", prompts.order_first(text, self._len()), phase, intent="answer")
         return self._generate(turn)
+
+    def _order_for(self, speaker: dict) -> str:
+        """이 참가자가 아직 따르지 않은 주최자 지시가 있으면, 발언 지시문 앞에 붙일 글을 돌려준다."""
+        if speaker["id"] == MOD_ID:
+            return ""
+        notes = []
+        for order in self.orders:
+            if speaker["id"] in order["todo"]:
+                order["todo"].discard(speaker["id"])
+                notes.append(prompts.order_reminder(order["text"]))
+        self.orders = [o for o in self.orders if o["todo"]]
+        return " ".join(notes)
 
     # ------------------------------------------------------------------ 만들기
     def _model(self, speaker: dict) -> str:
@@ -436,8 +457,9 @@ class Debate:
                 await self._gate()
                 private = speaker.get("hidden", "") if self.cfg.get("hidden_agenda", True) else ""
                 hint = prompts.TONE_HINT.get(self.cfg.get("tone") or "default", "")
+                order = self._order_for(speaker)
                 speech = await self.ctx.speak(
-                    speaker=speaker["name"], directive=f"{turn.directive} {hint}".strip(), private=private,
+                    speaker=speaker["name"], directive=f"{order} {turn.directive} {hint}".strip(), private=private,
                     model=self._model(speaker), effort=self._effort(speaker), on_event=on_event)
                 if not speech.text.strip():
                     raise ProviderError("모델이 빈 발언을 돌려주었습니다.")
@@ -765,6 +787,8 @@ class Debate:
             silence = self.turn_no - self.last_spoke.get(p["id"], 0)
             score += min(silence * 0.5, 3.5)                  # 오래 조용했던 사람은 조금씩 가산
             score += self.rng.uniform(0, 1.5)                 # 약간의 무작위
+            if any(p["id"] in o["todo"] for o in self.orders):
+                score += 4                                    # 주최자의 지시를 아직 따르지 않은 사람이 먼저
             scores[p["id"]] = score
         speaker = max(self.people, key=lambda p: scores[p["id"]])
         row = by_id[speaker["id"]]

@@ -96,6 +96,13 @@ class MockContext(Context):
             claim += "입니다."
         elif not claim.endswith("."):
             claim += "."
+        order_m = re.search(r'주최자[^:]*지시가 [^:]*: "(.+?)"', directive)
+        if order_m:   # 주최자의 지시를 받으면 그대로 따른다
+            lead = f"주최자의 지시대로 하겠습니다. '{order_m.group(1)}', 지금 바로 따르겠습니다. "
+            if speaker == "진행자":
+                return lead + "참가자 여러분도 차례로 따라 주시기 바랍니다."
+            rest = re.sub(r'먼저, 주최자의 지시가 .*?이어서 아래 일을 합니다\.', "", directive).strip()
+            return lead + (self._text(speaker, rest) if rest and "주최자" not in rest else claim)
         target_m = re.search(r"([가-힣A-Za-z]{2,}) 님", directive)
         target = target_m.group(1) if target_m else "앞서 말씀하신 분"
         others = [n for n in self.people if n not in (speaker, "진행자")]

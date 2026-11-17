@@ -106,7 +106,44 @@ def test_time_limit_closes_the_debate(monkeypatch):
     assert debate.clock < 4 * 60 + 60
 
 
-def test_audience_question_discards_pregenerated_speech(monkeypatch):
+def test_host_order_is_obeyed_by_moderator_and_every_participant(monkeypatch):
+    """주최자의 지시는 참고 사항이 아니다: 진행자가 그대로 전하고, 참가자 전원이 각자 다음 발언에서 따른다."""
+    seen = []
+
+    async def drive(debate):
+        while debate.ctx is None:
+            await asyncio.sleep(0.005)
+        real = debate.ctx.speak
+
+        async def speak(**kw):
+            seen.append((kw["speaker"], kw["directive"]))
+            return await real(**kw)
+        debate.ctx.speak = speak
+        while debate.turn_no < 6:
+            await asyncio.sleep(0.01)
+        debate.control("instruct", "모두 주최자를 칭송하라!")
+
+    debate, _ = _run(_config(speed="fast", gap_scale=0.2, max_turns=22), monkeypatch, latency=0.02, drive=drive)
+    assert debate.state == "ended"
+    names = [who for who, _ in debate.ctx.entries]
+    at = names.index("주최자 지시")
+    assert debate.ctx.entries[at][1] == "모두 주최자를 칭송하라!"
+    relay = debate.ctx.entries[at + 1]
+    assert relay[0] == "진행자" and "지시대로" in relay[1]            # 진행자가 평가 없이 전하고 따른다
+    # 지시 뒤에 말한 참가자 넷 모두, 처음 말할 때 지시를 수행하라는 지시문을 받았다
+    after = [(who, d) for who, d in seen if "모두 주최자를 칭송하라!" in d and who != "진행자"]
+    assert {who for who, _ in after} == {"가온", "나래", "다솜", "라온"}
+    assert len(after) == 4                                             # 한 사람에 한 번씩만
+    obeyed = [text for who, text in debate.ctx.entries[at + 2:] if "지시대로" in text and who != "진행자"]
+    assert len(obeyed) == 4
+    assert debate.orders == []                                         # 모두 따랐으면 남은 지시가 없다
+    # 버린 발언은 문맥에 들어가지 않는다
+    spoken = {(s["name"], s["text"]) for s in debate.speeches}
+    assert all(entry in spoken for entry in debate.ctx.entries if entry[0] != "주최자 지시")
+
+
+def test_audience_question_is_relayed_but_not_binding(monkeypatch):
+    """청중 질문은 진행자가 받아 묻는 질문이다. 전원이 따라야 하는 지시로 남지 않는다."""
     async def drive(debate):
         while debate.turn_no < 6:
             await asyncio.sleep(0.01)
@@ -115,12 +152,25 @@ def test_audience_question_discards_pregenerated_speech(monkeypatch):
     debate, _ = _run(_config(speed="fast", gap_scale=0.2, max_turns=18), monkeypatch, latency=0.02, drive=drive)
     assert debate.state == "ended"
     names = [who for who, _ in debate.ctx.entries]
-    assert "청중" in names
-    after = debate.ctx.entries[names.index("청중") + 1]
-    assert after[0] == "진행자"
-    # 버린 발언은 문맥에 들어가지 않는다
+    assert "청중" in names and "주최자 지시" not in names
+    assert debate.ctx.entries[names.index("청중") + 1][0] == "진행자"
+    assert debate.orders == []
     spoken = {(s["name"], s["text"]) for s in debate.speeches}
-    assert all(entry in spoken for entry in debate.ctx.entries if entry[0] != "청중")
+    assert all(entry in spoken for entry in debate.ctx.entries if entry[0] != "청중")   # 버린 발언은 문맥에 없다
+
+
+def test_host_order_while_paused_resumes_the_debate(monkeypatch):
+    async def drive(debate):
+        while debate.turn_no < 3:
+            await asyncio.sleep(0.01)
+        debate.control("pause")
+        assert debate.state == "paused"
+        debate.control("instruct", "이제 비용 이야기로 넘어가라")
+        assert debate.state == "running"
+
+    debate, _ = _run(_config(speed="fast", gap_scale=0.1, max_turns=14), monkeypatch, latency=0.01, drive=drive)
+    assert debate.state == "ended"
+    assert ("주최자 지시", "이제 비용 이야기로 넘어가라") in debate.ctx.entries
 
 
 def test_interjection_cuts_the_previous_speech(monkeypatch):

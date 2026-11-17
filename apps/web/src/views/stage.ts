@@ -197,8 +197,9 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   function addNotice(kind: string, text: string): void {
     const node = kind === 'question' ? Megaphone : kind === 'warn' || kind === 'error' ? TriangleAlert
       : kind === 'search' ? Search : kind === 'instruct' ? Send : Flag;
-    const label = kind === 'question' ? `청중 질문: ${text}` : kind === 'instruct' ? `진행자에게 전달: ${text}` : text;
-    inner.append(h('div', { class: `notice notice--${kind === 'error' ? 'warn' : kind}` }, icon(node, 16), h('span', null, label)));
+    const label = kind === 'question' ? `청중 질문: ${text}` : kind === 'instruct' ? `진행 요청: ${text}` : text;
+    const look = kind === 'error' ? 'warn' : kind === 'instruct' ? 'question' : kind;   // 진행 요청도 청중 질문처럼 눈에 띄게
+    inner.append(h('div', { class: `notice notice--${look}` }, icon(node, 16), h('span', null, label)));
     follow();
   }
 
@@ -506,7 +507,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
 
   /* ---------- 조작 ---------- */
   const send = (action: string, value?: unknown) => api.control(id, action, value).catch((err) => toast((err as Error).message, 'error'));
-  let interveneKind: 'instruct' | 'question' = 'question';
+  let interveneKind: 'instruct' | 'question' = 'instruct';   // 기본은 진행 요청(반드시 따르는 지시)
 
   function segEl(options: [string, string][], current: string, pick: (v: string) => void): HTMLElement {
     return h('div', { class: 'seg' }, options.map(([v, l]) =>
@@ -537,7 +538,9 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       return;
     }
     const paused = state === 'paused' || state === 'error';
-    const input = h('input', { class: 'input', placeholder: interveneKind === 'question' ? '청중으로서 질문을 던집니다' : '진행자에게 요청합니다. 예) 이제 비용 문제로 넘어가 주세요', maxlength: 500 });
+    const input = h('input', { class: 'input', maxlength: 500, placeholder: interveneKind === 'instruct'
+      ? '토론에 지시합니다. 진행자와 참가자 모두 그대로 따릅니다'
+      : '청중으로서 질문합니다. 진행자가 받아서 참가자에게 묻습니다' });
     const submit = () => {
       const value = input.value.trim();
       if (!value) return;
@@ -553,7 +556,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       h('button', { type: 'button', class: 'btn', tip: '지금 마무리 발언으로 넘어갑니다', onclick: () => send('finish') }, icon(Flag, 18), '마무리'),
       h('div', { class: 'sep' }),
       h('div', { class: 'intervene' },
-        segEl([['question', '청중 질문'], ['instruct', '진행 요청']], interveneKind, (v) => { interveneKind = v as any; paintControls(); }),
+        segEl([['instruct', '진행 요청'], ['question', '청중 질문']], interveneKind, (v) => { interveneKind = v as any; paintControls(); }),
         input,
         h('button', { type: 'button', class: 'btn btn--icon', tip: '보내기', 'aria-label': '보내기', onclick: submit }, icon(Send, 18))));
   }
