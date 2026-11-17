@@ -1,0 +1,153 @@
+"""mock 프로바이더로 토론 엔진을 끝까지 돌려 본다."""
+import asyncio
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from aitalk import store  # noqa: E402
+from aitalk.engine import MOD_ID, Debate  # noqa: E402
+from aitalk.providers.mock import MockProvider  # noqa: E402
+
+
+def _config(**over):
+    people = [
+        {"id": f"s{i}", "name": name, "title": "시험 인물", "viewpoint": view,
+         "claims": [f"{view}는 것이 핵심입니다", "비용이 문제입니다"], "hidden": "속내"}
+        for i, (name, view) in enumerate([("가온", "찬성"), ("나래", "반대"), ("다솜", "중립"), ("라온", "현실론")], 1)
+    ]
+    cfg = {"topic": "시험 주제", "participants": people, "moderator": True, "mode": "mixed",
+           "max_turns": 20, "max_minutes": None, "length": "normal", "interjection": True,
+           "speed": "instant", "gap_scale": 0, "search": "off", "model": "mock-large",
+           "effort": "low", "summary": True, "seed": 7, "compact_threshold": 150_000}
+    cfg.update(over)
+    return cfg
+
+
+def _run(cfg, monkeypatch, latency=0.0, drive=None):
+    saved = {}
+    monkeypatch.setattr(store, "save_debate", lambda rec: saved.update(rec))
+    debate = Debate("d_test", cfg, MockProvider(latency=latency, seed=3))
+
+    async def go():
+        debate.task = asyncio.create_task(debate.run())
+        if drive:
+            await drive(debate)
+        await asyncio.wait_for(debate.task, timeout=60)
+
+    asyncio.run(go())
+    return debate, saved
+
+
+def test_full_debate_runs_through_all_phases(monkeypatch):
+    debate, saved = _run(_config(), monkeypatch)
+    assert debate.state == "ended"
+    phases = [e["phase"] for e in debate.events if e["type"] == "phase"]
+    assert phases == ["opening", "statements", "free", "closing", "wrap"]
+    assert debate.turn_no <= 20
+    kinds = [s["kind"] for s in debate.speeches]
+    assert kinds[0] == "open" and kinds[-1] == "wrap"
+    assert kinds[1:5] == ["statement"] * 4
+    assert kinds[-5:-1] == ["closing"] * 4
+    # 자유토론에서는 같은 사람이 연달아 말하지 않는다
+    free = [s["speaker"] for s in debate.speeches if s["kind"] == "free"]
+    assert all(a != b for a, b in zip(free, free[1:]))
+    assert saved["summary"]["headline"]
+    assert any(e["type"] == "director" for e in debate.events)
+
+
+def test_every_started_speech_is_in_the_context_exactly_once(monkeypatch):
+    debate, _ = _run(_config(), monkeypatch)
+    spoken = [(s["name"], s["text"]) for s in debate.speeches]
+    assert debate.ctx.entries == spoken
+
+
+def test_sequential_mode_goes_round_robin(monkeypatch):
+    debate, _ = _run(_config(mode="sequential", moderator=False, max_turns=16), monkeypatch)
+    free = [s["speaker"] for s in debate.speeches if s["kind"] == "free"]
+    assert free[:4] == ["s1", "s2", "s3", "s4"]
+    assert all(s["speaker"] != MOD_ID for s in debate.speeches)
+
+
+def test_free_mode_without_moderator(monkeypatch):
+    debate, _ = _run(_config(mode="free", moderator=False, max_turns=12), monkeypatch)
+    assert debate.state == "ended"
+    assert debate.speeches[0]["kind"] == "free"
+    assert [s["kind"] for s in debate.speeches[-4:]] == ["closing"] * 4
+
+
+def test_time_limit_closes_the_debate(monkeypatch):
+    debate, _ = _run(_config(max_turns=None, max_minutes=4), monkeypatch)
+    assert debate.state == "ended"
+    assert debate.speeches[-1]["kind"] == "wrap"
+    assert debate.clock < 4 * 60 + 60
+
+
+def test_audience_question_discards_pregenerated_speech(monkeypatch):
+    async def drive(debate):
+        while debate.turn_no < 6:
+            await asyncio.sleep(0.01)
+        debate.control("question", "비용은 누가 냅니까?")
+
+    debate, _ = _run(_config(speed="fast", gap_scale=0.2, max_turns=18), monkeypatch, latency=0.02, drive=drive)
+    assert debate.state == "ended"
+    names = [who for who, _ in debate.ctx.entries]
+    assert "청중" in names
+    after = debate.ctx.entries[names.index("청중") + 1]
+    assert after[0] == "진행자"
+    # 버린 발언은 문맥에 들어가지 않는다
+    spoken = {(s["name"], s["text"]) for s in debate.speeches}
+    assert all(entry in spoken for entry in debate.ctx.entries if entry[0] != "청중")
+
+
+def test_interjection_cuts_the_previous_speech(monkeypatch):
+    cfg = _config(speed="fast", gap_scale=0.1, max_turns=40, moderator=False)
+    debate = None
+
+    def force_high_urge(real):
+        async def judge(**kw):
+            data, usage = await real(**kw)
+            for row in data["participants"]:
+                row["urge"], row["intent"] = 10, "rebut"
+            data["moderator_needed"] = False
+            return data, usage
+        return judge
+
+    saved = {}
+    monkeypatch.setattr(store, "save_debate", lambda rec: saved.update(rec))
+    provider = MockProvider(latency=0.01, seed=5)
+    debate = Debate("d_cut", cfg, provider)
+
+    async def go():
+        debate.task = asyncio.create_task(debate.run())
+        while debate.ctx is None:
+            await asyncio.sleep(0.005)
+        debate.ctx.judge = force_high_urge(debate.ctx.judge)
+        await asyncio.wait_for(debate.task, timeout=120)
+
+    asyncio.run(go())
+    cut = [s for s in debate.speeches if s["cut"]]
+    assert cut, "끼어들기로 끊긴 발언이 하나는 있어야 한다"
+    assert all(s["text"].endswith("—") for s in cut)
+    assert debate.ctx.entries == [(s["name"], s["text"]) for s in debate.speeches]
+    following = [debate.speeches[i + 1] for i, s in enumerate(debate.speeches[:-1]) if s["cut"]]
+    assert all(s["interject"] for s in following)
+
+
+def test_pause_and_resume(monkeypatch):
+    async def drive(debate):
+        while debate.turn_no < 3:
+            await asyncio.sleep(0.01)
+        debate.control("pause")
+        before = len(debate.events)
+        await asyncio.sleep(0.3)
+        assert len(debate.events) <= before + 3
+        debate.control("resume")
+
+    debate, _ = _run(_config(speed="fast", gap_scale=0.1, max_turns=12), monkeypatch, latency=0.01, drive=drive)
+    assert debate.state == "ended"
+
+
+def test_compaction_is_reported(monkeypatch):
+    debate, _ = _run(_config(max_turns=40, compact_threshold=300), monkeypatch)
+    assert any(e["type"] == "compaction" for e in debate.events)
