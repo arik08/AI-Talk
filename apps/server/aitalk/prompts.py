@@ -395,6 +395,37 @@ def pick_prompt(topic: str, count: int, policy: str, library: list[dict], materi
     return "\n".join(lines)
 
 
+REFRESH_SYSTEM = """당신은 토론 프로그램의 캐스팅 담당입니다. 참가자는 이미 정해져 있습니다. 주제가 바뀌었으므로, 사람은 그대로 두고 각자의 이 주제에서의 입장만 새로 씁니다.
+
+- 목록의 참가자를 한 명도 빼거나 바꾸지 않고 모두 적습니다. id는 목록에 적힌 그대로 옮겨 적습니다.
+- 사람마다 이 주제에서의 관점, 핵심 주장, 양보 지점을 새로 씁니다. 그 인물의 성격과 평소 생각에서 자연스럽게 나오는 입장이어야 합니다. 인물 소개에 없는 성격을 덧붙이지 않습니다.
+- 서로 부딪칠 지점이 분명해야 토론이 됩니다. 모두가 같은 쪽에 서지 않게 입장을 나눕니다.
+- 실존 인물이나 역사 속 인물은 널리 알려진 생각을 이 주제에 비추어 적습니다. 그 사람이 이 주제에 대해 실제로 한 말인 것처럼 꾸미지 않습니다.
+- 각 항목은 한두 문장으로 짧고 구체적으로 씁니다."""
+
+
+def refresh_prompt(topic: str, people: list[dict], policy: str = "auto", materials: str = "",
+                   concept: str = "", tone: str = "default") -> str:
+    """이미 정해진 참가자들의 입장만 바뀐 주제에 맞춰 다시 받는 글. people의 id는 부르는 쪽이 붙인 임시 번호다."""
+    lines = [f"토론 주제:\n{topic.strip()}", ""]
+    if concept.strip():
+        lines += ["이 토론의 설정과 분위기 (주제의 배경 정보나 따로 바라는 점이 적혀 있으면 그것도 반영하세요):", concept.strip(), ""]
+    if tone in TONE_LABEL:
+        lines += [f"토론의 분위기: {TONE_LABEL[tone]}.", ""]
+    lines += [f"아래 참가자 {len(people)}명은 이미 정해졌습니다. 모두 그대로 두고, 이 주제에서의 입장만 새로 쓰세요.",
+              f"구성 방침: {POLICIES.get(policy, POLICIES['auto'])}", "", "참가자 목록"]
+    for p in people:
+        lines.append(f"- [{p['id']}] {p['name']} / {p.get('title', '')} / 전문: {p.get('expertise', '')} / "
+                     f"성격: {p.get('personality', '')} / 말투: {p.get('speech', '')}")
+    if materials:
+        lines += ["", "토론에 쓸 자료의 앞부분입니다. 입장을 정하는 데 참고하세요.", materials[:6000]]
+    lines += ["", "항목 설명",
+              "- id: 참가자의 id (목록의 대괄호 안 값 그대로)",
+              "- viewpoint: 이 주제에서의 관점", "- claims: 이 주제에서의 핵심 주장 2~3개",
+              "- concede: 양보할 수 있는 지점"]
+    return "\n".join(lines)
+
+
 def pick_schema() -> dict:
     text = {"type": "string"}
     return {
