@@ -638,12 +638,27 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   inner.addEventListener('click', (e) => {
     const ref = (e.target as HTMLElement).closest?.('.turn-ref') as HTMLElement | null;
     const card = ref ? cards.get(Number(ref.dataset.turn))?.root : null;
-    if (!card) return;
-    card.scrollIntoView({ block: 'center', behavior: calm.matches ? 'auto' : 'smooth' });
+    if (card) showCard(card);
+  });
+
+  /** 그 발언을 화면 가운데로 가져와 잠깐 빛나게 한다. 멀리 있으면 가까이까지는 한 번에 건너뛰고 남은 짧은 거리만 움직인다.
+   *  처음부터 끝까지 부드럽게 움직이면 긴 토론에서 몇 초씩 걸린다. */
+  function showCard(card: HTMLElement): void {
+    const NEAR = 260;   // 이 거리만 움직여 보인다 (px)
+    const box = transcript.getBoundingClientRect();
+    const r = card.getBoundingClientRect();
+    const room = transcript.scrollHeight - transcript.clientHeight;
+    const goal = Math.max(0, Math.min(room, transcript.scrollTop + r.top - box.top - Math.max(0, (transcript.clientHeight - r.height) / 2)));
+    const gap = goal - transcript.scrollTop;
+    if (calm.matches) transcript.scrollTop = goal;
+    else {
+      if (Math.abs(gap) > NEAR) transcript.scrollTop = goal - Math.sign(gap) * NEAR;
+      transcript.scrollTo({ top: goal, behavior: 'smooth' });
+    }
     card.classList.remove('is-flash');
     void card.offsetWidth;
     card.classList.add('is-flash');
-  });
+  }
 
   /** 토론 아래에 붙는 카드의 차례: 회의록, 판정, 총 비용, 묻고 답하기. 새로 만든 카드를 제자리에 넣는다. */
   function placeTail(el: HTMLElement): void {
@@ -1166,11 +1181,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     timeline.setAttribute('aria-valuetext', `#${mark.id} ${mark.name}`);
     if (!replaying) {
       const card = cards.get(mark.id)?.root;
-      if (!card) return;
-      card.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      card.classList.remove('is-flash');
-      void card.offsetWidth;
-      card.classList.add('is-flash');
+      if (card) showCard(card);
       return;
     }
     window.clearTimeout(replayTimer);
