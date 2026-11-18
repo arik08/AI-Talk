@@ -33,6 +33,9 @@ export const api = {
   draftPersona: (hint: string) => request<Partial<Persona>>('/api/personas/draft', json({ hint })),
   cast: (body: { topic: string; concept?: string; tone?: string; count: number; policy: string; fixed: Partial<Persona>[]; materials: string; model?: string; effort?: string }) =>
     request<{ personas: Partial<Persona>[]; cost?: number }>('/api/cast', json(body)),
+  /** 새로 만들지 않고 보관함의 인물 가운데 주제에 맞는 사람을 골라, 입장만 주제에 맞춰 받는다. */
+  castLibrary: (body: { topic: string; concept?: string; tone?: string; count: number; policy: string; materials: string; model?: string; effort?: string }) =>
+    request<{ personas: Persona[]; cost?: number; library: number; asked: number }>('/api/cast/library', json(body)),
   uploadMaterial: (file: File) => {
     const form = new FormData();
     form.append('file', file);

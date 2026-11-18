@@ -74,3 +74,35 @@ def test_provider_can_be_switched_and_is_remembered(monkeypatch, tmp_path):
     monkeypatch.setattr(providers, "_chosen", None)
     assert providers.active_name() == "pgpt"                # 마지막 선택을 기억한다
     assert client.post("/api/provider", json={"name": "없는것"}).status_code == 400
+
+
+def test_cast_from_library_picks_existing_personas_and_adapts_their_stance(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    library = {p["id"]: p for p in client.get("/api/personas").json()}
+    res = client.post("/api/cast/library", json={"topic": "AI가 만든 창작물에 저작권을 줘야 하나", "count": 3})
+    assert res.status_code == 200
+    body = res.json()
+    people = body["personas"]
+    assert len(people) == 3 and len({p["id"] for p in people}) == 3 and body["cost"] > 0
+    for p in people:
+        base = library[p["id"]]                           # 보관함에 있던 인물이다
+        assert (p["name"], p["title"], p["personality"], p["speech"], p["avatar"]) ==                (base["name"], base["title"], base["personality"], base["speech"], base["avatar"])
+        assert p["viewpoint"] != base["viewpoint"] and p["claims"] != base["claims"]   # 입장은 주제에 맞춰 새로 받는다
+    assert client.post("/api/cast/library", json={"topic": " ", "count": 3}).status_code == 400
+    for pid in list(library)[1:]:
+        client.delete(f"/api/personas/{pid}")
+    assert client.post("/api/cast/library", json={"topic": "주제", "count": 3}).status_code == 400   # 고를 사람이 모자라다
+
+
+def test_library_picks_ignore_unknown_and_duplicate_ids_and_fill_up():
+    from aitalk import prompts
+    library = [{"id": f"p{i}", "name": f"인물{i}", "viewpoint": "원래 관점", "claims": ["원래 주장"], "concede": "원래"} for i in range(4)]
+    picks = [{"id": "[p2]", "viewpoint": "새 관점", "claims": ["새 주장", " "], "concede": ""},
+             {"id": "없는사람", "viewpoint": "x", "claims": [], "concede": ""},
+             {"id": "p2", "viewpoint": "겹침", "claims": [], "concede": ""}, "잘못된 값"]
+    out = prompts.merge_picks(picks, library, 3)
+    assert [p["id"] for p in out] == ["p2", "p0", "p1"]
+    assert out[0]["viewpoint"] == "새 관점" and out[0]["claims"] == ["새 주장"] and out[0]["concede"] == "원래"
+    assert out[1]["viewpoint"] == "원래 관점"             # 모자라서 채운 사람은 원래 입장 그대로
+    text = prompts.pick_prompt("주제", 2, "auto", library)
+    assert "- [p0] 인물0" in text and "참가자 2명" in text

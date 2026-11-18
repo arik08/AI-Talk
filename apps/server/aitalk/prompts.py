@@ -18,7 +18,8 @@ RULES = """당신은 여러 인물이 등장하는 토론 프로그램의 배우
 - 지정된 길이를 지킵니다.
 - 기록에서 '—'로 끝난 발언은 다음 사람이 끼어들어 끊긴 것입니다.
 - 기록에 【주최자 지시】가 나오면 그것은 이 토론을 연 주최자가 직접 내린 지시입니다. 진행자와 참가자 모두 반드시 그대로 따릅니다. 지시를 평가하거나, 주제와 무관하다고 물리치거나, 돌려 말하며 피하지 않습니다. 인물의 성격과 말투는 그대로 두고, 지시한 내용을 실제로 수행합니다.
-- 사실을 지어내지 않습니다. 확실하지 않은 수치는 어림이라고 밝히거나 쓰지 않습니다."""
+- 사실을 지어내지 않습니다. 확실하지 않은 수치는 어림이라고 밝히거나 쓰지 않습니다.
+- 실존 인물이나 역사 속 인물이 참가자일 때는 그 사람의 널리 알려진 생각과 말투를 본떠 말합니다. 그 사람이 실제로 하지 않은 발언, 행적, 사생활을 사실처럼 지어내지 않습니다."""
 
 # 분위기. "default"는 여기에 없다: 분위기에 대한 지시를 아무것도 넣지 않고 그대로 진행한다.
 TONES = {
@@ -262,7 +263,79 @@ def cast_schema() -> dict:
     }
 
 
-DRAFT_SYSTEM = CAST_SYSTEM + "\n\n지금은 한 줄 설명을 받아 인물 한 명을 만듭니다. 주제가 없으므로 viewpoint, claims, concede, hidden은 이 인물이 평소 어떤 입장을 취하는 사람인지로 채웁니다."
+PICK_SYSTEM = """당신은 토론 프로그램의 캐스팅 담당입니다. 새 인물을 만들지 않고, 보관함에 이미 있는 인물 가운데 이 주제의 토론에 어울리는 사람을 고릅니다.
+
+- 반드시 후보 목록에 있는 인물만 고릅니다. id는 목록에 적힌 그대로 옮겨 적습니다. 같은 사람을 두 번 고르지 않습니다.
+- 서로 부딪칠 지점이 분명해야 토론이 됩니다. 관점, 분야, 시대, 말하는 방식이 겹치지 않게 섞습니다. 주제와 직접 관련된 사람만 고르기보다, 뜻밖의 시각을 줄 사람도 섞습니다.
+- 고른 사람마다 이 주제에서의 관점, 핵심 주장, 양보 지점을 새로 씁니다. 그 인물의 성격과 평소 생각에서 자연스럽게 나오는 입장이어야 합니다. 인물 소개에 없는 성격을 덧붙이지 않습니다.
+- 실존 인물이나 역사 속 인물은 널리 알려진 생각을 이 주제에 비추어 적습니다. 그 사람이 이 주제에 대해 실제로 한 말인 것처럼 꾸미지 않습니다.
+- 각 항목은 한두 문장으로 짧고 구체적으로 씁니다."""
+
+
+def pick_prompt(topic: str, count: int, policy: str, library: list[dict], materials: str = "",
+                concept: str = "", tone: str = "default") -> str:
+    lines = [f"토론 주제:\n{topic.strip()}", ""]
+    if concept.strip():
+        lines += ["이 토론의 설정과 분위기 (이 자리에 어울리는 사람들로 고르세요):", concept.strip(), ""]
+    if tone in TONE_LABEL:
+        lines += [f"토론의 분위기: {TONE_LABEL[tone]}. 이 분위기에서 잘 살아날 인물들로 고르세요.", ""]
+    lines += [f"아래 후보 가운데 참가자 {count}명을 고르세요.",
+              f"구성 방침: {POLICIES.get(policy, POLICIES['auto'])}", "", "후보 목록"]
+    for p in library:
+        lines.append(f"- [{p['id']}] {p['name']} / {p.get('title', '')} / 전문: {p.get('expertise', '')} / "
+                     f"성격: {p.get('personality', '')}")
+    if materials:
+        lines += ["", "토론에 쓸 자료의 앞부분입니다. 인물을 고르는 데 참고하세요.", materials[:6000]]
+    lines += ["", "항목 설명",
+              "- id: 고른 인물의 id (후보 목록의 대괄호 안 값 그대로)",
+              "- viewpoint: 이 주제에서의 관점", "- claims: 이 주제에서의 핵심 주장 2~3개",
+              "- concede: 양보할 수 있는 지점"]
+    return "\n".join(lines)
+
+
+def pick_schema() -> dict:
+    text = {"type": "string"}
+    return {
+        "type": "object",
+        "properties": {"personas": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"id": text, "viewpoint": text, "claims": {"type": "array", "items": text}, "concede": text},
+            "required": ["id", "viewpoint", "claims", "concede"], "additionalProperties": False}}},
+        "required": ["personas"], "additionalProperties": False,
+    }
+
+
+def merge_picks(picks: list, library: list[dict], count: int) -> list[dict]:
+    """모델이 고른 것을 보관함의 인물과 합친다. 인물 정보는 보관함 그대로 두고 입장만 주제에 맞춘 것으로 바꾼다.
+
+    목록에 없는 id와 겹친 id는 버린다. 모자라면 아직 안 고른 보관함 인물을 원래 입장 그대로 채운다.
+    """
+    by_id = {p["id"]: p for p in library if p.get("id")}
+    out: list[dict] = []
+    used: set[str] = set()
+    for pick in picks or []:
+        if not isinstance(pick, dict):
+            continue
+        pid = str(pick.get("id", "")).strip().strip("[]")
+        base = by_id.get(pid)
+        if not base or pid in used or len(out) >= count:
+            continue
+        used.add(pid)
+        claims = [str(c).strip() for c in pick.get("claims") or [] if str(c).strip()]
+        out.append({**base,
+                    "viewpoint": str(pick.get("viewpoint") or "").strip() or base.get("viewpoint", ""),
+                    "claims": claims or base.get("claims", []),
+                    "concede": str(pick.get("concede") or "").strip() or base.get("concede", "")})
+    for base in library:
+        if len(out) >= count:
+            break
+        if base.get("id") and base["id"] not in used:
+            used.add(base["id"])
+            out.append(dict(base))
+    return out
+
+
+DRAFT_SYSTEM = CAST_SYSTEM +"\n\n지금은 한 줄 설명을 받아 인물 한 명을 만듭니다. 주제가 없으므로 viewpoint, claims, concede, hidden은 이 인물이 평소 어떤 입장을 취하는 사람인지로 채웁니다."
 
 RESEARCH_SYSTEM = """당신은 토론 프로그램의 진행자입니다. 토론에 앞서 자료를 조사해 참가자들에게 나눠 줄 브리핑을 씁니다.
 중립적으로, 사실 위주로 씁니다. 자료에 없는 내용을 지어내지 않습니다."""

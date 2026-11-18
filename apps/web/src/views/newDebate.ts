@@ -207,6 +207,9 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     ([['auto', '알아서 구성'], ['balanced', '찬반 균형'], ['stakeholders', '여러 이해관계자'], ['experts', '전문가 패널']] as const)
       .map(([v, l]) => h('option', { value: v, selected: draft.policy === v }, l)));
   const genBtn = h('button', { type: 'button', class: 'btn', onclick: () => generateAll() }, icon(Sparkles, 18), '자동 생성');
+  const pickBtn = h('button', { type: 'button', class: 'btn', onclick: () => pickFromLibrary(),
+    tip: '새로 만들지 않고, 보관함의 인물 가운데 주제에 어울리는 사람을 AI가 골라 입장을 주제에 맞춥니다' }, icon(Library, 18), '보관함에서 구성');
+  let picking = false;   // 보관함에서 고르는 중인지 (자동 생성과 구분해 버튼에 보여 준다)
   const castGrid = h('div', { class: 'cast-grid' });
   const bulkBar = h('div', { class: 'panel bulk-bar hidden' });
   const countNote = h('span', { class: 'muted small' });
@@ -216,7 +219,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       h('div', { class: 'stepper' }, minus, countLabel, plus), policy,
       seg<AvatarSet | 'mix'>([...AVATAR_SETS.map((s) => [s.id, s.label] as [AvatarSet, string]), ['mix', '섞어서']],
         () => draft.avatarSet, (v) => { draft.avatarSet = v; reassignAvatars(); }),
-      genBtn, toggle('진행자', () => draft.moderator, (v) => { draft.moderator = v; }), countNote),
+      genBtn, pickBtn, toggle('진행자', () => draft.moderator, (v) => { draft.moderator = v; }), countNote),
     bulkBar, castGrid));
 
   function setCount(n: number): void {
@@ -270,6 +273,38 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       return false;
     } finally {
       busy = false;
+      loading.clear();
+      paintCast();
+    }
+  }
+
+  /** 새 인물을 만들지 않고, 보관함에서 주제에 어울리는 사람을 골라 입장만 주제에 맞춘다. */
+  async function pickFromLibrary(): Promise<boolean> {
+    if (!draft.topic.trim()) { toast('주제를 먼저 적어 주세요.', 'error'); topic.focus(); return false; }
+    if (busy) return false;
+    busy = true;
+    picking = true;
+    draft.cast.forEach((_, i) => loading.add(i));
+    paintCast();
+    try {
+      const { personas, cost, library: size } = await api.castLibrary({
+        topic: draft.topic, concept: draft.concept, tone: draft.tone, count: draft.count, policy: draft.policy,
+        materials: draft.materials.map((m) => m.text).join('\n\n').slice(0, 6000),
+        model: draft.model || undefined, effort: draft.effort || undefined,
+      });
+      draft.prepCost += cost ?? 0;
+      if (personas.length < draft.count) {
+        toast(`보관함에 인물이 ${size}명뿐이라 ${personas.length}명으로 구성했습니다.`);
+        draft.count = Math.max(2, personas.length);
+      }
+      draft.cast = Array.from({ length: draft.count }, (_, i) => (personas[i] ? { ...dress(personas[i], i), fromLibrary: true } : null));
+      return true;
+    } catch (err) {
+      toast((err as Error).message, 'error');
+      return false;
+    } finally {
+      busy = false;
+      picking = false;
       loading.clear();
       paintCast();
     }
@@ -383,7 +418,11 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     countNote.textContent = draft.count > 5 ? '5명이 넘으면 한 사람의 발언 기회가 줄어듭니다' : '';
     genBtn.disabled = busy;
     clear(genBtn);
-    genBtn.append(icon(busy ? LoaderCircle : Sparkles, 18, busy ? 'spin' : ''), busy ? '만드는 중' : draft.cast.some(Boolean) ? '다시 자동 생성' : '자동 생성');
+    const making = busy && !picking;
+    genBtn.append(icon(making ? LoaderCircle : Sparkles, 18, making ? 'spin' : ''), making ? '만드는 중' : draft.cast.some(Boolean) ? '다시 자동 생성' : '자동 생성');
+    pickBtn.disabled = busy;
+    clear(pickBtn);
+    pickBtn.append(icon(picking ? LoaderCircle : Library, 18, picking ? 'spin' : ''), picking ? '고르는 중' : '보관함에서 구성');
     paintBulk();
     clear(castGrid);
     while (draft.cast.length < draft.count) draft.cast.push(null);

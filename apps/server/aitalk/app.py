@@ -211,6 +211,41 @@ async def cast(body: CastIn) -> dict:
     return {"personas": people, "usage": usage.to_dict(), "cost": round(usage.cost(price), 5)}
 
 
+class CastLibraryIn(BaseModel):
+    topic: str
+    concept: str = ""
+    tone: str = "default"
+    count: int = 4
+    policy: str = "auto"
+    materials: str = ""
+    model: Optional[str] = None
+    effort: Optional[str] = None
+
+
+@app.post("/api/cast/library")
+async def cast_from_library(body: CastLibraryIn) -> dict:
+    """새로 만들지 않고, 보관함의 인물 가운데 주제에 어울리는 사람을 골라 입장만 주제에 맞춘다."""
+    if not body.topic.strip():
+        raise HTTPException(400, "주제를 먼저 적어 주세요.")
+    library = [p for p in store.list_personas() if p.get("id") and p.get("name")]
+    if len(library) < 2:
+        raise HTTPException(400, "보관함에 인물이 2명 이상 있어야 합니다. 페르소나 메뉴에서 만들 수 있습니다.")
+    count = max(2, min(10, body.count, len(library)))
+    provider = get_provider()
+    used = body.model or provider.default_model
+    try:
+        data, usage = await provider.generate_json(
+            system=prompts.PICK_SYSTEM,
+            prompt=prompts.pick_prompt(body.topic, count, body.policy, library, body.materials, body.concept, body.tone),
+            schema=prompts.pick_schema(), model=used, effort=body.effort or provider.default_effort)
+    except ProviderError as exc:
+        raise _fail(exc) from exc
+    people = prompts.merge_picks(data.get("personas") or [], library, count)
+    price = next((m.price for m in await provider.list_models() if m.id == used), None)
+    return {"personas": people, "usage": usage.to_dict(), "cost": round(usage.cost(price), 5),
+            "library": len(library), "asked": body.count}
+
+
 # ---------------------------------------------------------------- 자료
 @app.post("/api/materials")
 async def material_upload(file: UploadFile = File(...)) -> dict:

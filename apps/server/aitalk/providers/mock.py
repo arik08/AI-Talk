@@ -231,6 +231,15 @@ class MockProvider(Provider):
                             model: str, effort: str) -> tuple[dict, Usage]:
         await asyncio.sleep(self.latency)
         props = schema.get("properties", {})
+        if "id" in props.get("personas", {}).get("items", {}).get("properties", {}):
+            # 보관함에서 고르기: 후보 목록의 앞에서부터 고르고 입장을 주제에 맞춘 것처럼 채운다
+            m = re.search(r"참가자 (\d+)명", prompt)
+            ids = re.findall(r"^- \[([^\]]+)\] ", prompt, re.MULTILINE)
+            return {"personas": [
+                {"id": pid, "viewpoint": "이 주제는 내가 평생 해 온 일의 연장선에 있다",
+                 "claims": ["원칙부터 다시 세워야 합니다", "말보다 결과로 보여야 합니다"],
+                 "concede": "방법은 달라질 수 있다"}
+                for pid in ids[: int(m.group(1)) if m else 2]]}, Usage(input=500, output=300)
         if "personas" in props:
             m = re.search(r"참가자 (\d+)명", prompt)
             count = int(m.group(1)) if m else 1
