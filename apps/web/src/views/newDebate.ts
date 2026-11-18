@@ -1,5 +1,5 @@
 import {
-  ChevronRight, ClipboardPaste, Drama, FileText, Globe, Library, RotateCcw, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Upload, Users,
+  ChevronRight, ClipboardPaste, Drama, FileText, Globe, Library, RotateCcw, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Square, SquareCheck, Upload, Users,
 } from 'lucide';
 import { api } from '../api';
 import { AVATAR_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
@@ -214,9 +214,11 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     ([['auto', '알아서 구성'], ['balanced', '찬반 균형'], ['stakeholders', '여러 이해관계자'], ['experts', '전문가 패널']] as const)
       .map(([v, l]) => h('option', { value: v, selected: draft.policy === v }, l)));
   const genBtn = h('button', { type: 'button', class: 'btn', onclick: () => generateAll() }, icon(Sparkles, 18), '자동 생성');
-  const pickBtn = h('button', { type: 'button', class: 'btn', onclick: () => pickFromLibrary(),
-    tip: '새로 만들지 않고, 보관함의 인물 가운데 주제에 어울리는 사람을 AI가 골라 입장을 주제에 맞춥니다' }, icon(Library, 18), '보관함에서 구성');
+  const pickBtn = h('button', { type: 'button', class: 'btn pick-btn', 'aria-haspopup': 'true', onclick: () => togglePickMenu(),
+    tip: '새로 만들지 않고 보관함의 인물로 구성합니다. 직접 고르거나, 주제에 어울리는 사람을 AI가 고르게 할 수 있습니다' }, icon(Library, 18), '보관함에서 구성');
+  const pickWrap = h('div', { class: 'pick-wrap' }, pickBtn);
   let picking = false;   // 보관함에서 고르는 중인지 (자동 생성과 구분해 버튼에 보여 준다)
+  const chosen = new Set<string>();   // 보관함 목록에서 직접 체크한 인물. 남은 자리만 AI가 고른다
   const castGrid = h('div', { class: 'cast-grid' });
   const bulkBar = h('div', { class: 'panel bulk-bar hidden' });
   const countNote = h('span', { class: 'muted small' });
@@ -226,7 +228,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       h('div', { class: 'stepper' }, minus, countLabel, plus), policy,
       seg<AvatarSet | 'mix'>([...AVATAR_SETS.map((s) => [s.id, s.label] as [AvatarSet, string]), ['mix', '섞어서']],
         () => draft.avatarSet, (v) => { draft.avatarSet = v; reassignAvatars(); }),
-      genBtn, pickBtn, toggle('진행자', () => draft.moderator, (v) => { draft.moderator = v; }), countNote),
+      genBtn, pickWrap, toggle('진행자', () => draft.moderator, (v) => { draft.moderator = v; }), countNote),
     bulkBar, castGrid));
 
   function setCount(n: number): void {
@@ -285,8 +287,9 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     }
   }
 
-  /** 새 인물을 만들지 않고, 보관함에서 주제에 어울리는 사람을 골라 입장만 주제에 맞춘다. */
-  async function pickFromLibrary(): Promise<boolean> {
+  /** 새 인물을 만들지 않고, 보관함에서 주제에 어울리는 사람을 골라 입장만 주제에 맞춘다.
+   *  picked(직접 체크한 사람)는 그대로 넣고, 남은 자리만 AI가 고른다. */
+  async function pickFromLibrary(picked: string[] = []): Promise<boolean> {
     if (!draft.topic.trim()) { toast('주제를 먼저 적어 주세요.', 'error'); topic.focus(); return false; }
     if (busy) return false;
     busy = true;
@@ -295,7 +298,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     paintCast();
     try {
       const { personas, cost, library: size } = await api.castLibrary({
-        topic: draft.topic, concept: draft.concept, tone: draft.tone, count: draft.count, policy: draft.policy,
+        topic: draft.topic, concept: draft.concept, tone: draft.tone, count: draft.count, policy: draft.policy, picked,
         materials: draft.materials.map((m) => m.text).join('\n\n').slice(0, 6000),
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
@@ -341,7 +344,52 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     }
   }
 
-  function closeMenu(): void { menu?.remove(); menu = null; }
+  function closeMenu(): void { menu?.remove(); menu = null; pickBtn.setAttribute('aria-expanded', 'false'); }
+
+  /** 보관함에서 구성: 맨 위에 자동선택, 그 아래로 인물을 체크한다. 체크한 사람은 그대로 넣고 남은 자리만 AI가 고른다. */
+  function togglePickMenu(): void {
+    if (menu?.classList.contains('pick-menu')) { closeMenu(); return; }
+    closeMenu();
+    const people = library.filter((p) => p.id);
+    for (const id of chosen) if (!people.some((p) => p.id === id)) chosen.delete(id);
+    const box = h('div', { class: 'menu pick-menu' });
+    menu = box;
+    const paint = () => {
+      const room = Math.min(draft.count, people.length);
+      while (chosen.size > room) chosen.delete([...chosen].pop()!);   // 정원을 줄였으면 나중에 고른 사람부터 뺀다
+      const left = room - chosen.size;
+      const note = people.length < 2 ? '보관함에 인물이 2명 이상 있어야 합니다. 페르소나 메뉴에서 만들 수 있습니다'
+        : !chosen.size ? `${room}명 모두 주제에 어울리는 사람으로 AI가 고릅니다`
+          : left ? `고른 ${chosen.size}명은 그대로 넣고, 남은 ${left}자리를 AI가 고릅니다`
+            : `고른 ${chosen.size}명으로 구성하고 입장을 주제에 맞춥니다`;
+      const auto = h('button', { type: 'button', class: 'pick-auto', disabled: people.length < 2, onclick: () => {
+        const picked = [...chosen];
+        closeMenu();
+        void pickFromLibrary(picked);
+      } }, icon(Sparkles, 18), h('span', null, h('div', null, '자동선택'), h('div', { class: 'muted' }, note)));
+      const list = h('div', { class: 'pick-list', role: 'group', 'aria-label': '직접 넣을 인물' });
+      for (const p of people) {
+        const on = chosen.has(p.id!);
+        const av = createAvatar(p.avatar, p.color, 32);
+        av.classList.add('is-still');
+        list.append(h('button', { type: 'button', role: 'checkbox', 'aria-checked': String(on), class: on ? 'is-on' : '',
+          disabled: !on && left <= 0, onclick: () => {
+            if (on) chosen.delete(p.id!); else chosen.add(p.id!);
+            const top = list.scrollTop;
+            paint();
+            const next = box.querySelector('.pick-list') as HTMLElement;
+            next.scrollTop = top;
+            (next.children[people.indexOf(p)] as HTMLElement).focus();
+          } }, icon(on ? SquareCheck : Square, 18, 'pick-check'), av,
+          h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))));
+      }
+      box.replaceChildren(auto,
+        h('div', { class: 'pick-count muted' }, `직접 고르기 ${chosen.size} / ${room}명`), list);
+    };
+    paint();
+    pickWrap.append(box);
+    pickBtn.setAttribute('aria-expanded', 'true');
+  }
   function openLibrary(index: number, anchor: HTMLElement): void {
     closeMenu();
     const used = new Set(draft.cast.filter(Boolean).map((p) => p!.id).filter(Boolean));
@@ -362,7 +410,10 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     menu.style.left = '1rem';
     menu.style.bottom = '3.25rem';
   }
-  const onDocClick = (e: MouseEvent) => { if (menu && !(e.target as HTMLElement).closest('.menu, .lib-btn')) closeMenu(); };
+  const onDocClick = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;   // 체크하면 목록을 다시 그리므로, 눌린 줄이 이미 화면에서 빠졌으면 메뉴 안을 누른 것이다
+    if (menu && target.isConnected && !target.closest('.menu, .lib-btn, .pick-btn')) closeMenu();
+  };
   document.addEventListener('click', onDocClick);
 
   const shortModel = (id: string) => ((status?.models ?? []).find((m) => m.id === id)?.label ?? id).replace(/^Claude /, '');
@@ -428,6 +479,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     const making = busy && !picking;
     genBtn.append(icon(making ? LoaderCircle : Sparkles, 18, making ? 'spin' : ''), making ? '만드는 중' : draft.cast.some(Boolean) ? '다시 자동 생성' : '자동 생성');
     pickBtn.disabled = busy;
+    if (busy && menu?.classList.contains('pick-menu')) closeMenu();
     clear(pickBtn);
     pickBtn.append(icon(picking ? LoaderCircle : Library, 18, picking ? 'spin' : ''), picking ? '고르는 중' : '보관함에서 구성');
     paintBulk();

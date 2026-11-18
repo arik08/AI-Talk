@@ -275,14 +275,23 @@ PICK_SYSTEM = """당신은 토론 프로그램의 캐스팅 담당입니다. 새
 
 
 def pick_prompt(topic: str, count: int, policy: str, library: list[dict], materials: str = "",
-                concept: str = "", tone: str = "default") -> str:
+                concept: str = "", tone: str = "default", required: list[str] | None = None) -> str:
     lines = [f"토론 주제:\n{topic.strip()}", ""]
     if concept.strip():
         lines += ["이 토론의 설정과 분위기 (이 자리에 어울리는 사람들로 고르세요. 주제의 배경 정보나 따로 바라는 점이 적혀 있으면 그것도 반영하세요):", concept.strip(), ""]
     if tone in TONE_LABEL:
         lines += [f"토론의 분위기: {TONE_LABEL[tone]}. 이 분위기에서 잘 살아날 인물들로 고르세요.", ""]
     lines += [f"아래 후보 가운데 참가자 {count}명을 고르세요.",
-              f"구성 방침: {POLICIES.get(policy, POLICIES['auto'])}", "", "후보 목록"]
+              f"구성 방침: {POLICIES.get(policy, POLICIES['auto'])}"]
+    names = {p["id"]: p["name"] for p in library}
+    must = [pid for pid in required or [] if pid in names][:count]
+    if must:   # 사용자가 직접 고른 사람은 그대로 넣고, 남은 자리만 고르게 한다
+        rest = count - len(must)
+        lines += ["", "사용자가 직접 고른 인물입니다. 반드시 포함하고, 이 사람들의 입장도 주제에 맞춰 씁니다: "
+                  + ", ".join(f"[{pid}] {names[pid]}" for pid in must),
+                  f"남은 {rest}자리는 이 사람들과 잘 부딪칠 사람으로 후보 목록에서 고르세요." if rest
+                  else "더 고를 자리는 없습니다. 이 사람들만 적으세요."]
+    lines += ["", "후보 목록"]
     for p in library:
         lines.append(f"- [{p['id']}] {p['name']} / {p.get('title', '')} / 전문: {p.get('expertise', '')} / "
                      f"성격: {p.get('personality', '')}")
@@ -307,33 +316,34 @@ def pick_schema() -> dict:
     }
 
 
-def merge_picks(picks: list, library: list[dict], count: int) -> list[dict]:
+def merge_picks(picks: list, library: list[dict], count: int, required: list[str] | None = None) -> list[dict]:
     """모델이 고른 것을 보관함의 인물과 합친다. 인물 정보는 보관함 그대로 두고 입장만 주제에 맞춘 것으로 바꾼다.
 
     목록에 없는 id와 겹친 id는 버린다. 모자라면 아직 안 고른 보관함 인물을 원래 입장 그대로 채운다.
+    required(사용자가 직접 고른 사람)는 모델이 빠뜨려도 반드시 들어가고, 맨 앞에 온다.
     """
     by_id = {p["id"]: p for p in library if p.get("id")}
-    out: list[dict] = []
-    used: set[str] = set()
+    adapted: dict[str, dict] = {}
     for pick in picks or []:
         if not isinstance(pick, dict):
             continue
         pid = str(pick.get("id", "")).strip().strip("[]")
         base = by_id.get(pid)
-        if not base or pid in used or len(out) >= count:
+        if not base or pid in adapted:
             continue
-        used.add(pid)
         claims = [str(c).strip() for c in pick.get("claims") or [] if str(c).strip()]
-        out.append({**base,
-                    "viewpoint": str(pick.get("viewpoint") or "").strip() or base.get("viewpoint", ""),
-                    "claims": claims or base.get("claims", []),
-                    "concede": str(pick.get("concede") or "").strip() or base.get("concede", "")})
-    for base in library:
+        adapted[pid] = {**base,
+                        "viewpoint": str(pick.get("viewpoint") or "").strip() or base.get("viewpoint", ""),
+                        "claims": claims or base.get("claims", []),
+                        "concede": str(pick.get("concede") or "").strip() or base.get("concede", "")}
+    out: list[dict] = []
+    used: set[str] = set()
+    for pid in [*(required or []), *adapted, *by_id]:
         if len(out) >= count:
             break
-        if base.get("id") and base["id"] not in used:
-            used.add(base["id"])
-            out.append(dict(base))
+        if pid in by_id and pid not in used:
+            used.add(pid)
+            out.append(adapted.get(pid) or dict(by_id[pid]))
     return out
 
 

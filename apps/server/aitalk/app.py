@@ -217,6 +217,7 @@ class CastLibraryIn(BaseModel):
     tone: str = "default"
     count: int = 4
     policy: str = "auto"
+    picked: list[str] = Field(default_factory=list)   # 사용자가 직접 고른 인물의 id. 남은 자리만 AI가 고른다
     materials: str = ""
     model: Optional[str] = None
     effort: Optional[str] = None
@@ -231,16 +232,19 @@ async def cast_from_library(body: CastLibraryIn) -> dict:
     if len(library) < 2:
         raise HTTPException(400, "보관함에 인물이 2명 이상 있어야 합니다. 페르소나 메뉴에서 만들 수 있습니다.")
     count = max(2, min(10, body.count, len(library)))
+    known = {p["id"] for p in library}
+    picked = list(dict.fromkeys(pid for pid in body.picked if pid in known))[:count]
     provider = get_provider()
     used = body.model or provider.default_model
     try:
         data, usage = await provider.generate_json(
             system=prompts.PICK_SYSTEM,
-            prompt=prompts.pick_prompt(body.topic, count, body.policy, library, body.materials, body.concept, body.tone),
+            prompt=prompts.pick_prompt(body.topic, count, body.policy, library, body.materials, body.concept, body.tone,
+                                       picked),
             schema=prompts.pick_schema(), model=used, effort=body.effort or provider.default_effort)
     except ProviderError as exc:
         raise _fail(exc) from exc
-    people = prompts.merge_picks(data.get("personas") or [], library, count)
+    people = prompts.merge_picks(data.get("personas") or [], library, count, picked)
     price = next((m.price for m in await provider.list_models() if m.id == used), None)
     return {"personas": people, "usage": usage.to_dict(), "cost": round(usage.cost(price), 5),
             "library": len(library), "asked": body.count}

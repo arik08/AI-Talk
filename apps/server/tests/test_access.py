@@ -88,6 +88,11 @@ def test_cast_from_library_picks_existing_personas_and_adapts_their_stance(monke
         base = library[p["id"]]                           # 보관함에 있던 인물이다
         assert (p["name"], p["title"], p["personality"], p["speech"], p["avatar"]) ==                (base["name"], base["title"], base["personality"], base["speech"], base["avatar"])
         assert p["viewpoint"] != base["viewpoint"] and p["claims"] != base["claims"]   # 입장은 주제에 맞춰 새로 받는다
+    # 직접 고른 사람은 반드시 들어가고 맨 앞에 온다. 남은 자리만 자동으로 채운다
+    mine = list(library)[-2:]
+    res = client.post("/api/cast/library", json={"topic": "주제", "count": 4, "picked": mine + ["없는사람", mine[0]]})
+    ids = [p["id"] for p in res.json()["personas"]]
+    assert ids[:2] == mine and len(ids) == 4 and len(set(ids)) == 4
     assert client.post("/api/cast/library", json={"topic": " ", "count": 3}).status_code == 400
     for pid in list(library)[1:]:
         client.delete(f"/api/personas/{pid}")
@@ -104,5 +109,10 @@ def test_library_picks_ignore_unknown_and_duplicate_ids_and_fill_up():
     assert [p["id"] for p in out] == ["p2", "p0", "p1"]
     assert out[0]["viewpoint"] == "새 관점" and out[0]["claims"] == ["새 주장"] and out[0]["concede"] == "원래"
     assert out[1]["viewpoint"] == "원래 관점"             # 모자라서 채운 사람은 원래 입장 그대로
+    out = prompts.merge_picks(picks, library, 3, ["p3", "p2"])
+    assert [p["id"] for p in out] == ["p3", "p2", "p0"]
+    assert out[0]["viewpoint"] == "원래 관점" and out[1]["viewpoint"] == "새 관점"   # 모델이 빠뜨린 사람도 들어간다
+    text = prompts.pick_prompt("주제", 3, "auto", library, required=["p3"])
+    assert "[p3] 인물3" in text and "남은 2자리" in text
     text = prompts.pick_prompt("주제", 2, "auto", library)
     assert "- [p0] 인물0" in text and "참가자 2명" in text

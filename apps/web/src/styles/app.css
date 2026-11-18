@@ -326,6 +326,18 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .menu button { display: flex; align-items: center; gap: .625rem; width: 100%; padding: .375rem .625rem; border: 0; background: transparent; text-align: left; cursor: pointer; border-radius: 2px; font-size: .9375rem; }
 .menu button:hover { background: rgb(var(--gold-rgb) / .1); }
 .menu .muted { font-size: .8125rem; }
+/* 보관함에서 구성: 맨 위에 자동선택이 고정되고, 아래 인물 목록만 스크롤된다 */
+.pick-wrap { position: relative; display: inline-flex; }
+.pick-menu { top: calc(100% + .375rem); left: 0; width: 22rem; max-width: calc(100vw - 2rem); max-height: none; overflow: visible; padding: 0; }
+.pick-menu .pick-auto { padding: .75rem .875rem; border-bottom: 1px solid var(--line); border-radius: 0; color: var(--gold-hi); }
+.pick-menu .pick-auto .ico { color: var(--gold); flex: none; }
+.pick-menu .pick-count { padding: .5rem .875rem .125rem; }
+.pick-list { max-height: 20rem; overflow: auto; padding: .375rem; }
+.pick-list .pick-check { flex: none; color: var(--muted); }
+.pick-list button.is-on .pick-check { color: var(--gold); }
+.menu button:disabled { opacity: .45; cursor: not-allowed; }
+.menu button:disabled:hover { background: transparent; }
+.menu button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 /* 칸의 최소 폭을 19rem으로: 본문 폭에서 세 칸이 되어 슬라이더와 버튼 묶음이 넉넉히 들어간다 */
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1.25rem 2rem; }
 .settings-grid > * { min-width: 0; }   /* 안의 내용이 넓어도 칸을 밀어내거나 옆 칸으로 넘치지 않게 */
