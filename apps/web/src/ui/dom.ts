@@ -1,4 +1,4 @@
-import { createElement, Trash2, TriangleAlert, type IconNode } from 'lucide';
+import { createElement, Star, Trash2, TriangleAlert, type IconNode } from 'lucide';
 
 type Child = Node | string | number | null | undefined | false;
 
@@ -127,6 +127,36 @@ export function installFullscreen(): void {
       .catch(() => toast('전체화면으로 바꾸지 못했습니다. 다시 눌러 주세요.', 'error'))
       .finally(() => { busy = false; });
   }, true);
+}
+
+/* ---------- 즐겨찾기 별: 누르면 바로 바뀌고, 저장하지 못하면 되돌린다 ---------- */
+export function favButton(p: { fav?: boolean }, save: (on: boolean) => Promise<unknown>, opts: { size?: number; cls?: string; after?: () => void } = {}): HTMLButtonElement {
+  const btn = h('button', { class: `${opts.cls ?? 'btn btn--icon'} fav`, type: 'button' });
+  const paint = () => {
+    const label = p.fav ? '즐겨찾기 해제' : '즐겨찾기';
+    clear(btn);
+    btn.append(icon(Star, opts.size ?? 18));
+    btn.dataset.tip = label;
+    btn.setAttribute('aria-label', label);
+    btn.setAttribute('aria-pressed', String(!!p.fav));
+    btn.classList.toggle('is-on', !!p.fav);
+  };
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const on = !p.fav;
+    p.fav = on;
+    paint();
+    try {
+      await save(on);
+      opts.after?.();
+    } catch (err) {
+      p.fav = !on;
+      paint();
+      toast((err as Error).message, 'error');
+    }
+  });
+  paint();
+  return btn;
 }
 
 /* ---------- 삭제 버튼: 휴지통 → 경고 아이콘 → 한 번 더 눌러야 지운다 ---------- */

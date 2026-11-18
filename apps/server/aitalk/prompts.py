@@ -338,6 +338,7 @@ PICK_SYSTEM = """당신은 토론 프로그램의 캐스팅 담당입니다. 새
 - 먼저 주제에 가까운 사람을 찾습니다. 주제의 산업, 분야, 현장, 이해관계를 직접 겪었거나 다뤄 온 인물이 후보에 있으면 그 사람들이 토론의 중심이 됩니다. 인물의 소개와 전문 분야를 주제와 하나씩 견주어 보세요.
 - 뜻밖의 시각을 줄 사람은 양념입니다. 주제와 거리가 먼 인물은 요청에 적힌 수까지만 넣고, 그 사람이 이 주제에 던질 수 있는 물음이 분명할 때만 고릅니다. 유명하거나 말솜씨가 좋다는 이유만으로 고르지 않습니다.
 - 서로 부딪칠 지점이 분명해야 토론이 됩니다. 주제에 가까운 사람들 안에서도 관점과 말하는 방식이 겹치지 않게 고릅니다.
+- 후보 목록에 ★가 붙은 사람은 사용자가 즐겨 찾는 인물입니다. 이 주제에서 할 말이 있는 사람이면 ★가 없는 비슷한 후보보다 먼저 고릅니다. 뜻밖의 인물 자리도 되도록 ★ 가운데서 고릅니다. 다만 주제에 맞는 입장을 세우기 어려운 사람을 ★라는 이유만으로 넣지는 않습니다.
 - 고른 사람마다 이 주제에서의 관점, 핵심 주장, 양보 지점을 새로 씁니다. 그 인물의 성격과 평소 생각에서 자연스럽게 나오는 입장이어야 합니다. 인물 소개에 없는 성격을 덧붙이지 않습니다.
 - 실존 인물이나 역사 속 인물은 널리 알려진 생각을 이 주제에 비추어 적습니다. 그 사람이 이 주제에 대해 실제로 한 말인 것처럼 꾸미지 않습니다.
 - 각 항목은 한두 문장으로 짧고 구체적으로 씁니다."""
@@ -366,7 +367,7 @@ def pick_prompt(topic: str, count: int, policy: str, library: list[dict], materi
                   else "더 고를 자리는 없습니다. 이 사람들만 적으세요."]
     lines += ["", "후보 목록"]
     for p in library:
-        lines.append(f"- [{p['id']}] {p['name']} / {p.get('title', '')} / 전문: {p.get('expertise', '')} / "
+        lines.append(f"- {'★ ' if p.get('fav') else ''}[{p['id']}] {p['name']} / {p.get('title', '')} / 전문: {p.get('expertise', '')} / "
                      f"성격: {p.get('personality', '')}")
     if materials:
         lines += ["", "토론에 쓸 자료의 앞부분입니다. 인물을 고르는 데 참고하세요.", materials[:6000]]
@@ -392,7 +393,7 @@ def pick_schema() -> dict:
 def merge_picks(picks: list, library: list[dict], count: int, required: list[str] | None = None) -> list[dict]:
     """모델이 고른 것을 보관함의 인물과 합친다. 인물 정보는 보관함 그대로 두고 입장만 주제에 맞춘 것으로 바꾼다.
 
-    목록에 없는 id와 겹친 id는 버린다. 모자라면 아직 안 고른 보관함 인물을 원래 입장 그대로 채운다.
+    목록에 없는 id와 겹친 id는 버린다. 모자라면 아직 안 고른 보관함 인물을 원래 입장 그대로 채운다 (즐겨 찾는 인물부터).
     required(사용자가 직접 고른 사람)는 모델이 빠뜨려도 반드시 들어가고, 맨 앞에 온다.
     """
     by_id = {p["id"]: p for p in library if p.get("id")}
@@ -411,7 +412,8 @@ def merge_picks(picks: list, library: list[dict], count: int, required: list[str
                         "concede": str(pick.get("concede") or "").strip() or base.get("concede", "")}
     out: list[dict] = []
     used: set[str] = set()
-    for pid in [*(required or []), *adapted, *by_id]:
+    spare = sorted(by_id, key=lambda pid: not by_id[pid].get("fav"))   # 모자란 자리는 즐겨 찾는 인물부터 채운다
+    for pid in [*(required or []), *adapted, *spare]:
         if len(out) >= count:
             break
         if pid in by_id and pid not in used:

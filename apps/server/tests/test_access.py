@@ -132,6 +132,11 @@ def test_library_picks_ignore_unknown_and_duplicate_ids_and_fill_up():
     assert "[p3] 인물3" in text and "남은 2자리" in text
     text = prompts.pick_prompt("주제", 2, "auto", library)
     assert "- [p0] 인물0" in text and "참가자 2명" in text
+    # 즐겨 찾는 인물은 후보 목록에 ★로 표시되고, 모자란 자리를 채울 때도 먼저 들어간다
+    library[3]["fav"] = True
+    text = prompts.pick_prompt("주제", 2, "auto", library)
+    assert "- ★ [p3] 인물3" in text and "- [p0] 인물0" in text
+    assert [p["id"] for p in prompts.merge_picks([], library, 2)] == ["p3", "p0"]
 
 
 def test_verdict_ranks_every_participant_and_is_saved(monkeypatch, tmp_path):

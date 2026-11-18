@@ -78,6 +78,7 @@ export const api = {
   personas: () => request<Persona[]>('/api/personas'),
   savePersona: (p: Persona) => request<Persona>('/api/personas', json(p)),
   deletePersona: (id: string) => request<{ ok: boolean }>(`/api/personas/${id}`, { method: 'DELETE' }),
+  favoritePersona: (id: string, on: boolean) => request<{ id: string; fav: boolean }>(`/api/personas/${id}/favorite`, json({ on })),
   importPersonas: (items: unknown[]) => request<{ added: number }>('/api/personas/import', json(items)),
   draftPersona: (hint: string) => request<Partial<Persona>>('/api/personas/draft', json({ hint })),
   cast: (body: { topic: string; concept?: string; tone?: string; count: number; policy: string; fixed: Partial<Persona>[]; materials: string; model?: string; effort?: string }) =>

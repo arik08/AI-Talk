@@ -149,6 +149,18 @@ async def persona_delete(persona_id: str) -> dict:
     return {"ok": True}
 
 
+class FavoriteIn(BaseModel):
+    on: bool = True
+
+
+@app.post("/api/personas/{persona_id}/favorite")
+async def persona_favorite(persona_id: str, body: FavoriteIn) -> dict:
+    """즐겨 찾는 인물로 표시하거나 푼다. 목록에서 앞에 나오고, 보관함에서 구성할 때 먼저 고려된다."""
+    if not store.set_favorite(persona_id, body.on):
+        raise HTTPException(404, "보관함에 없는 인물입니다.")
+    return {"id": persona_id, "fav": body.on}
+
+
 @app.post("/api/personas/import")
 async def persona_import(items: list[dict]) -> dict:
     return {"added": store.import_personas(items)}

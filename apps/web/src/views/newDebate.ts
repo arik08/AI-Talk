@@ -6,7 +6,7 @@ import { spreadColors } from '../colors';
 import { AVATAR_SETS, RANDOM_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { PALETTE, type AvatarSet, type Mood, type Persona } from '../types';
-import { clear, deleteButton, fmtUsd, h, icon, put, safeColor, toast } from '../ui/dom';
+import { clear, deleteButton, favButton, fmtUsd, h, icon, put, safeColor, toast } from '../ui/dom';
 
 interface Slot extends Persona { fromLibrary?: boolean; ownColor?: string }   // ownColor: 앞사람과 겹쳐 색을 바꾸기 전의 자기 색
 interface Material { name: string; text: string; chars: number; tokens: number }
@@ -402,7 +402,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   function togglePickMenu(): void {
     if (menu?.classList.contains('pick-menu')) { closeMenu(); return; }
     closeMenu();
-    const people = library.filter((p) => p.id);
+    const all = library.filter((p) => p.id);
+    const people = [...all.filter((p) => p.fav), ...all.filter((p) => !p.fav)];   // 즐겨 찾는 인물이 앞에 온다. 메뉴가 열려 있는 동안은 순서를 바꾸지 않는다
     for (const id of chosen) if (!people.some((p) => p.id === id)) chosen.delete(id);
     const box = h('div', { class: 'menu pick-menu' });
     menu = box;
@@ -438,16 +439,17 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         const on = chosen.has(p.id!);
         const av = createAvatar(p.avatar, p.color, 32);
         av.classList.add('is-still');
-        list.append(h('button', { type: 'button', role: 'checkbox', 'aria-checked': String(on), class: on ? 'is-on' : '',
+        list.append(h('div', { class: 'pick-row' }, h('button', { type: 'button', role: 'checkbox', 'aria-checked': String(on), class: on ? 'is-on' : '',
           disabled: !on && left <= 0, onclick: () => {
             if (on) chosen.delete(p.id!); else chosen.add(p.id!);
             const top = list.scrollTop;
             paint();
             const next = box.querySelector('.pick-list') as HTMLElement;
             next.scrollTop = top;
-            (next.children[people.indexOf(p)] as HTMLElement).focus();
+            (next.children[people.indexOf(p)].firstElementChild as HTMLElement).focus();
           } }, icon(on ? SquareCheck : Square, 18, 'pick-check'), av,
-          h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))));
+          h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))),
+          favButton(p, (fav) => api.favoritePersona(p.id!, fav), { cls: '' })));
       }
       sift(list);
       box.replaceChildren(auto,
@@ -462,7 +464,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     closeMenu();
     const used = new Set(draft.cast.filter(Boolean).map((p) => p!.id).filter(Boolean));
     menu = h('div', { class: 'menu' });
-    const items = library.filter((p) => !used.has(p.id));
+    const free = library.filter((p) => !used.has(p.id));
+    const items = [...free.filter((p) => p.fav), ...free.filter((p) => !p.fav)];
     if (!items.length) menu.append(h('div', { class: 'muted small', style: 'padding:.5rem .625rem' }, '고를 인물이 없습니다. 페르소나 메뉴에서 만들 수 있습니다.'));
     const rows: HTMLElement[] = [];
     const none = h('div', { class: 'muted small', style: 'padding:.5rem .625rem', hidden: true }, '찾는 인물이 없습니다');
@@ -480,11 +483,12 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     for (const p of items) {
       const av = createAvatar(p.avatar, p.color, 32);
       av.classList.add('is-still');
-      rows.push(h('button', { type: 'button', onclick: () => {
+      rows.push(h('div', { class: 'pick-row' }, h('button', { type: 'button', onclick: () => {
         draft.cast[index] = { ...dress(p, index), fromLibrary: true };
         closeMenu();
         paintCast();
-      } }, av, h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))));
+      } }, av, h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))),
+        favButton(p, (fav) => api.favoritePersona(p.id!, fav), { cls: '' })));
     }
     menu.append(...rows, none);
     const card = anchor.closest('.pcard') as HTMLElement;

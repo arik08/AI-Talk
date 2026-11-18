@@ -1,9 +1,9 @@
-import { Copy, Download, LoaderCircle, Pencil, Plus, Sparkles, Upload, X } from 'lucide';
+import { Copy, Download, LoaderCircle, Pencil, Plus, Sparkles, Star, Upload, X } from 'lucide';
 import { api } from '../api';
 import { AVATAR_SETS, FIGURES, createAvatar, normalizeSpec, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { MOOD_LABEL, PALETTE, type AvatarSet, type Mood, type Persona } from '../types';
-import { clear, deleteButton, h, icon, safeColor, toast } from '../ui/dom';
+import { clear, deleteButton, favButton, h, icon, safeColor, toast } from '../ui/dom';
 
 const MOODS = Object.keys(MOOD_LABEL) as Mood[];
 
@@ -18,6 +18,7 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
   let people: Persona[] = [];
   let query = '';
   let tag = '';
+  let favOnly = false;
   let drawer: HTMLElement | null = null;
 
   const grid = h('div', { class: 'cast-grid' });
@@ -41,7 +42,7 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
 
   root.append(h('div', { class: 'page' },
     h('div', { class: 'page-head' },
-      h('div', null, h('h1', null, '페르소나 보관함', countNote), h('p', null, '여기 둔 인물은 어느 토론에나 불러 쓸 수 있습니다. 입장은 토론마다 주제에 맞춰 새로 정해집니다. 실존 인물과 역사 속 인물은 널리 알려진 생각과 말투를 본뜬 AI의 재현이며, 실제 그 사람의 발언이 아닙니다.')),
+      h('div', null, h('h1', null, '페르소나 보관함', countNote), h('p', null, '여기 둔 인물은 어느 토론에나 불러 쓸 수 있습니다. 별을 눌러 즐겨 찾는 인물로 두면 목록 앞에 나오고, 보관함에서 자동으로 구성할 때 먼저 고려됩니다. 입장은 토론마다 주제에 맞춰 새로 정해집니다. 실존 인물과 역사 속 인물은 널리 알려진 생각과 말투를 본뜬 AI의 재현이며, 실제 그 사람의 발언이 아닙니다.')),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'btn', onclick: () => fileInput.click() }, icon(Upload, 18), '가져오기'), fileInput,
         h('button', { type: 'button', class: 'btn', onclick: exportAll }, icon(Download, 18), '내보내기'),
@@ -59,8 +60,10 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
   function paint(): void {
     const tags = Array.from(new Set(people.flatMap((p) => p.tags ?? []))).sort();
     clear(tagBar);
+    tagBar.append(h('button', { type: 'button', class: `chip chip--fav${favOnly ? ' is-on' : ''}`, 'aria-pressed': String(favOnly),
+      onclick: () => { favOnly = !favOnly; paint(); } }, icon(Star, 14), `즐겨찾기 ${people.filter((p) => p.fav).length}`));
     tags.forEach((t) => tagBar.append(h('button', { type: 'button', class: `chip${tag === t ? ' is-on' : ''}`, onclick: () => { tag = tag === t ? '' : t; paint(); } }, t)));
-    const shown = people.filter((p) => (!tag || (p.tags ?? []).includes(tag))
+    const shown = people.filter((p) => (!favOnly || p.fav) && (!tag || (p.tags ?? []).includes(tag))
       && (!query || [p.name, p.title, p.expertise, ...(p.tags ?? [])].join(' ').toLowerCase().includes(query)));
     countNote.textContent = shown.length === people.length ? `${people.length}명` : `${people.length}명 중 ${shown.length}명`;
     clear(grid);
@@ -78,7 +81,8 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
         h('div', { class: 'pcard-head' },
           h('button', { type: 'button', class: 'avatar-btn', tip: '눌러서 감정 움직임 미리 보기', 'aria-label': '감정 움직임 미리 보기',
             onclick: () => { k += 1; setAvatar(av, { mood: MOODS[k % MOODS.length], state: k % 2 ? 'speaking' : 'listening' }); } }, av),
-          h('div', { class: 'grow' }, h('div', { class: 'pcard-name' }, p.name), h('div', { class: 'pcard-title' }, p.title))),
+          h('div', { class: 'grow' }, h('div', { class: 'pcard-name' }, p.name), h('div', { class: 'pcard-title' }, p.title)),
+          favButton(p, (on) => api.favoritePersona(p.id!, on), { size: 20, after: () => { if (favOnly) paint(); else paintFavChip(); } })),
         p.personality ? h('div', { class: 'pcard-view' }, p.personality) : null,
         p.speech ? h('div', { class: 'muted small' }, `말투: ${p.speech}`) : null,
         h('div', { class: 'pcard-meta' }, p.expertise ? h('span', { class: 'chip chip--c' }, p.expertise) : null,
@@ -97,9 +101,16 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
     });
   }
 
+  /** 별을 누를 때마다 카드를 다시 그리면 화면이 출렁여서, 즐겨찾기 칩의 숫자만 고친다. 순서는 다음에 열 때 맞춘다. */
+  function paintFavChip(): void {
+    const chip = tagBar.querySelector('.chip--fav');
+    if (chip) chip.replaceChildren(icon(Star, 14), `즐겨찾기 ${people.filter((p) => p.fav).length}`);
+  }
+
   async function load(): Promise<void> {
     try {
-      people = await api.personas();
+      const list = await api.personas();
+      people = [...list.filter((p) => p.fav), ...list.filter((p) => !p.fav)];   // 즐겨 찾는 인물이 앞에 온다
     } catch (err) {
       toast((err as Error).message, 'error');
     }

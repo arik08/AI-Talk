@@ -59,6 +59,24 @@ def test_debate_round_trip_and_minutes_update(tmp_path, monkeypatch):
     assert store.load_debate("d_one") is None
 
 
+def test_favorites_survive_edits_and_preset_refresh_and_go_with_the_persona(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    mine = store.save_persona({"name": "내가 만든 인물"})
+    assert not any(p["fav"] for p in store.list_personas())
+    assert store.set_favorite("preset_musk", True) and store.set_favorite(mine["id"], True)
+    assert not store.set_favorite("없는사람", True)
+    favs = lambda: {p["id"] for p in store.list_personas() if p["fav"]}
+    assert favs() == {"preset_musk", mine["id"]}
+    store.save_persona({**mine, "title": "고침", "fav": False})          # 고쳐 저장해도 즐겨찾기는 그대로
+    assert favs() == {"preset_musk", mine["id"]}
+    store.set_meta("presets", "1")                                        # 기본 인물 묶음이 새로 들어가도 남는다
+    monkeypatch.setattr(store, "_ready_for", None)
+    assert favs() == {"preset_musk", mine["id"]}
+    store.set_favorite("preset_musk", False)
+    store.delete_persona(mine["id"])                                      # 지운 인물은 즐겨찾기에서도 빠진다
+    assert favs() == set() and store.get_meta("favorites") == "[]"
+
+
 def test_presets_are_the_famous_people_set():
     import json
     people = json.loads((store.PRESETS / "personas.json").read_text(encoding="utf-8"))
