@@ -448,6 +448,8 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .sp-no { margin-left: auto; color: var(--dim); font-size: .8125rem; font-variant-numeric: tabular-nums; }
 .sp-text { font-size: 1.0625rem; line-height: 1.75; color: var(--text); white-space: pre-wrap; }
 .sp-text .ch { animation: ch-in .55s var(--ease) backwards; }
+.minutes .ch { animation: mn-in .55s var(--ease) backwards; }
+@keyframes mn-in { 0% { opacity: 0; color: var(--gold-hi); } 45% { opacity: 1; color: var(--gold-hi); } 100% { opacity: 1; } }
 @keyframes ch-in { 0% { opacity: 0; color: var(--ct, var(--c)); } 45% { opacity: 1; color: var(--ct, var(--c)); } 100% { opacity: 1; } }
 .sp-text .caret { display: inline-block; width: .5rem; height: 1.05em; margin-left: .125rem; vertical-align: -.15em; background: var(--c); animation: pulse .9s steps(2) infinite; }
 .sp-cut { color: var(--ember); font-weight: 600; }

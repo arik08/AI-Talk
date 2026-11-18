@@ -14,6 +14,46 @@ import { drawSpeech, renderSpeech, speechBlocks, speechLength } from '../ui/spee
 
 interface Seat { persona: Persona; tile: HTMLElement; av: HTMLElement; urge: HTMLElement; status: HTMLElement; badge: HTMLElement }
 interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; av: HTMLElement; speaker: string; cut: boolean; started: boolean; raw: string; times: number[] }
+const REVEAL_CPS = 90;   // 쓰이는 중인 회의록·판정의 글자가 나타나는 빠르기 (초당 글자 수)
+
+/**
+ * 쓰이는 중인 카드(회의록, 판정)의 새 글자를 발언처럼 왼쪽부터 차례로 나타나게 한다.
+ * 이 카드들은 조각이 올 때마다 통째로 다시 그려서, 그대로 두면 글이 덩어리째 턱턱 붙는다.
+ * 글자마다 나타날 시각을 times에 적어 두고, 다시 그려도 나타나던 글자는 하던 움직임을 이어 간다.
+ * 조각이 몰려 와도 앞 글자 뒤에 줄을 세워 한결같은 빠르기로 흘러나온다.
+ */
+export function reveal(root: HTMLElement, times: number[]): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let total = 0;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    nodes.push(n as Text);
+    total += Array.from((n as Text).data).length;
+  }
+  const now = performance.now();
+  if (total < times.length) times.length = total;
+  const fresh = total - times.length;
+  if (fresh > 0) {
+    const step = Math.min(1000 / REVEAL_CPS, 900 / fresh);
+    const start = Math.min(Math.max(now, (times[times.length - 1] ?? 0) + step), now + 1200);   // 너무 밀리면 따라잡는다
+    for (let k = 0; k < fresh; k += 1) times.push(start + k * step);
+  }
+  let index = 0;
+  for (const node of nodes) {
+    const chars = Array.from(node.data);
+    const base = index;
+    index += chars.length;
+    const first = chars.findIndex((_, k) => times[base + k] - now > -CH_IN_MS);
+    if (first < 0) continue;   // 이미 다 나타난 글
+    const frag = document.createDocumentFragment();
+    if (first) frag.append(chars.slice(0, first).join(''));
+    for (let k = first; k < chars.length; k += 1) {
+      frag.append(h('span', { class: 'ch', style: `animation-delay:${Math.round(times[base + k] - now)}ms` }, chars[k]));
+    }
+    node.replaceWith(frag);
+  }
+}
+
 const CH_IN_MS = 550;   // 글자 하나가 나타나는 움직임의 길이 (app.css의 ch-in과 같다)
 
 /** 덧붙이는 설명은 늘 보이게 두지 않고, 정보 아이콘에 마우스를 올렸을 때 보여 준다. */
@@ -55,6 +95,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   // 토론 시계: 서버는 발언이 끝날 때만 알려 준다. 그 사이에는 화면에 나온 글자 수로 어림해 1초씩 올린다
   const clock = { base: 0, shown: 0, max: null as number | null };
   let minutesEl: HTMLElement | null = null;
+  let minutesTimes: number[] = [];   // 쓰이는 중인 회의록·판정의 글자가 나타날 시각 (reveal)
+  let verdictTimes: number[] = [];
   let waitEl: HTMLElement | null = null;   // 회의록을 쓰는 동안 그 자리에 놓는 카드
   let waitTimer = 0;
   let costEl: HTMLElement | null = null;
@@ -462,7 +504,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         h('div', { class: 'mw-clock', tip: '쓰기 시작한 뒤 지난 시간', 'aria-hidden': 'true' }, icon(Hourglass, 14), elapsed)),
       h('div', { class: 'mw-lines', 'aria-hidden': 'true' }, [0, 1, 2, 3].map(() => h('i', null))));
     waitTimer = window.setInterval(() => { elapsed.textContent = fmtTime((performance.now() - started) / 1000); }, 1000);
-    const below = [minutesEl, verdictEl, qaEl, costEl].find((el) => el?.isConnected);   // 다시 쓰는 중이면 예전 회의록 바로 위에
+    const below = [minutesEl, verdictEl, costEl, qaEl].find((el) => el?.isConnected);   // 다시 쓰는 중이면 예전 회의록 바로 위에
     if (below) below.before(waitEl);
     else inner.append(waitEl);
     if (scroll) waitEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -475,9 +517,9 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     waitEl = null;
   }
 
-  /** 토론 아래에 붙는 카드의 차례: 회의록, 판정, 묻고 답하기, 총 비용. 새로 만든 카드를 제자리에 넣는다. */
+  /** 토론 아래에 붙는 카드의 차례: 회의록, 판정, 총 비용, 묻고 답하기. 새로 만든 카드를 제자리에 넣는다. */
   function placeTail(el: HTMLElement): void {
-    const order = [minutesEl, verdictEl, qaEl, costEl];
+    const order = [minutesEl, verdictEl, costEl, qaEl];
     const next = order.slice(order.indexOf(el) + 1).find((x) => x?.isConnected);
     if (next) next.before(el);
     else inner.append(el);
@@ -513,6 +555,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
           h('span', { style: `--c:${nameColor(pt.name ?? '')}` }, pt.name ?? ''), h('span', null, pt.point ?? '')])))),
       list('합의 사항', 'agreements'), list('미결 사항', 'open_issues'), list('후속 조치', 'follow_ups'),
       has('conclusion') ? h('div', { class: 'takeaway' }, m.conclusion) : null);
+    if (partial || minutesTimes.length) reveal(minutesEl, minutesTimes);   // 다 쓴 순간에도 나오던 글자는 마저 흘러나온다
+    if (!partial) minutesTimes = [];
     if (opts.scroll) minutesEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
@@ -548,6 +592,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       }),
       moment.why ? h('div', { class: 'takeaway' }, h('small', null, `가장 인상적인 장면 · ${moment.turn ?? ''} ${moment.name ?? ''}`), moment.why) : null,
       partial ? null : h('p', { class: 'muted small', style: 'margin-top:1rem' }, '어느 입장이 옳은지가 아니라 누가 토론을 더 잘했는지를 본 AI의 평가입니다.'));
+    if (partial || verdictTimes.length) reveal(verdictEl, verdictTimes);
+    if (!partial) verdictTimes = [];
     if (opts.scroll) verdictEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
@@ -648,8 +694,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         (p.minutes ?? 0) > 0 ? row('회의록', p.minutes) : null,
         (p.extra ?? 0) > 0 ? row('판정과 질문', p.extra, '토론이 끝난 뒤에 든 비용') : null));
     old?.remove();
-    inner.append(fresh);
     costEl = fresh;
+    placeTail(fresh);   // 묻고 답하기는 비용 아래에 온다
   }
 
   async function writeMinutes(): Promise<void> {
@@ -921,7 +967,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     clockTurn.textContent = '0';
   }
 
-  /** 토론 아래에 붙는 것들을 한꺼번에 그린다: 회의록, 판정, 묻고 답하기, 총 비용. */
+  /** 토론 아래에 붙는 것들을 한꺼번에 그린다: 회의록, 판정, 총 비용, 묻고 답하기. */
   function showTail(): void {
     if (record?.minutes) showMinutes(record.minutes);
     if (record?.verdict) showVerdict(record.verdict);
