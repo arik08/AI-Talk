@@ -266,13 +266,6 @@ export const FIGURES: Figure[] = [
     hair: p('M25 45 Q20 15 52 15 Q82 16 75 45 Q73 30 60 27 Q44 24 33 30 Q27 34 25 45Z', '#C9C9CC')
       + l('M30 29 Q50 18 72 27', '#9A9AA0', 1) + l('M34 25 Q52 16 68 22', '#9A9AA0', 0.9),
     over: glassesThin('#5A5A60') },
-
-  // 가르마를 탄 흰 머리, 가는 금속테 둥근 안경, 남색 정장에 푸른 넥타이
-  { name: '장인화', skin: '#EBC29C', face: 'round', brow: '#9A9A9E', ...suit('#1E2D4A', '#2F6DB5'),
-    marks: NOSE.soft + FOREHEAD + SMILE_LINES,
-    hair: p('M24 45 Q21 19 50 19 Q79 19 76 45 Q72 33 64 29 Q50 21 36 29 Q28 33 24 45Z', '#DEDEE2')
-      + l('M38 28 Q44 22 54 20.5', '#A9A9B0', 1) + l('M44 27 Q56 23 70 31', '#A9A9B0', 0.9),
-    over: glassesRound('#7A7A82', 1.1) },
 ];
 
 /** 둥근 틀 안에 들어가는 그림(눈썹·눈·입 아래). */

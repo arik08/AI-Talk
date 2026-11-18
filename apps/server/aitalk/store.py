@@ -75,7 +75,7 @@ def _connect() -> sqlite3.Connection:
     return con
 
 
-PRESET_SET = "7"   # 기본 인물 묶음의 판. 묶음을 바꿀 때 올린다 (2: 유명인 13명, 3: 22명, 4: 인물 아바타, 5: 24명, 6: 27명, 7: 28명)
+PRESET_SET = "8"   # 기본 인물 묶음의 판. 묶음을 바꿀 때 올린다 (2: 유명인 13명, 3: 22명, 4: 인물 아바타, 5: 24명, 6: 27명, 7: 28명, 8: 27명)
 
 
 def _insert_presets(con: sqlite3.Connection, people: list) -> None:
