@@ -24,7 +24,7 @@ const draft = {
   moderator: true,
   mode: 'mixed',
   turnsOn: true, maxTurns: 30,
-  minutesOn: true, maxMinutes: 20,
+  minutesOn: true, maxMinutes: 10,
   length: 'auto',
   speed: 'normal',
   interjection: true,
@@ -46,11 +46,12 @@ const SETTING_KEYS = ['count', 'policy', 'avatarSet', 'moderator', 'mode', 'turn
   'length', 'speed', 'interjection', 'gapScale', 'search', 'maxSearches', 'model', 'effort', 'perSpeaker', 'badge', 'summary',
   'reactions', 'tone', 'hiddenAgenda'] as const;
 const STORE_KEY = 'aitalk.settings.v1';
+const CLOCK_BASIS = 2;   // 토론 시계의 기준. 2: 보통 속도로 화면에 나오는 시간 (그 전에는 사람이 말하는 속도였다)
 const pick = (): Record<string, unknown> => Object.fromEntries(SETTING_KEYS.map((k) => [k, (draft as any)[k]]));
 const DEFAULTS = pick();
 
 function persist(): void {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(pick())); } catch { /* 저장이 막혀 있어도 화면은 그대로 쓴다 */ }
+  try { localStorage.setItem(STORE_KEY, JSON.stringify({ ...pick(), clock: CLOCK_BASIS })); } catch { /* 저장이 막혀 있어도 화면은 그대로 쓴다 */ }
   saveDraft();
 }
 
@@ -106,6 +107,8 @@ function restore(): void {
       if (value === undefined) continue;
       if (base === null ? (value === null || typeof value === 'boolean') : typeof value === typeof base) (draft as any)[k] = value;
     }
+    // 토론 시계의 기준이 바뀌기 전에 기억된 기본값 20분은 새 기본값으로 옮긴다 (같은 분량이 새 기준으로는 8분쯤이다)
+    if (saved.clock !== CLOCK_BASIS && draft.maxMinutes === 20) draft.maxMinutes = 10;
     if (!['auto', 'off'].includes(draft.search)) draft.search = 'auto';
     if (!['default', 'humorous', 'serious', 'creative'].includes(draft.tone)) draft.tone = 'default';
     if (!['auto', 'short', 'normal', 'long'].includes(draft.length)) draft.length = 'auto';
