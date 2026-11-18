@@ -383,9 +383,17 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .adv[open] > summary .ico { transform: rotate(90deg); }
 .adv > summary .ico { transition: transform var(--fast) var(--ease); }
 .adv .settings-grid { margin-top: 1.25rem; }
+/* 토론 시작 줄: 화면 아래에 붙여 두지 않고 내용의 맨 끝에 둔다. 붙여 두면 참가자 카드를 늘 가렸다 */
 .start-bar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; align-items: center; justify-content: center; gap: 1.5rem;
-  padding: .875rem 1.75rem; background: rgb(var(--bg-rgb) / .92); backdrop-filter: blur(10px); border-top: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center; gap: 1.5rem; flex-wrap: wrap;
+  margin-top: 2.5rem; padding-top: 1.75rem; border-top: 1px solid var(--line);
+}
+.page:has(> .start-bar) { padding-bottom: 3.5rem; }   /* 붙여 둔 띠에 가리지 않게 두던 아래 여백을 줄인다 */
+/* 은근한 강조: 눌러 볼 만한 때가 된 버튼. 테두리와 글자를 금색으로 올리고 옅게 채운다 (가장 중요한 버튼의 금색 채움보다는 약하다) */
+.btn--nudge:not(:disabled) {
+  border-color: var(--gold); color: var(--gold-hi);
+  background: linear-gradient(180deg, rgb(var(--gold-rgb) / .2), rgb(var(--gold-rgb) / .08));
+  box-shadow: 0 0 0 1px rgb(var(--gold-rgb) / .18), 0 4px 14px rgb(var(--gold-rgb) / .14);
 }
 .start-bar .muted { font-size: .9375rem; }
 .banner { display: flex; gap: .75rem; align-items: flex-start; padding: .75rem 1rem; border: 1px solid rgb(var(--ember-rgb) / .5); border-left-width: 3px; border-radius: var(--r); background: rgb(var(--ember-rgb) / .07); color: var(--warn-text); font-size: .9375rem; margin-bottom: 1.5rem; }

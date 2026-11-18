@@ -21,6 +21,7 @@ const draft = {
   policy: 'auto',
   avatarSet: 'bot' as AvatarSet | 'mix',
   cast: [] as (Slot | null)[],
+  stanceTopic: '',   // 참가자들의 입장을 마지막으로 맞춘 때의 주제. 지금 주제와 많이 다르면 "입장 새로 맞추기"를 강조한다
   moderator: true,
   mode: 'mixed',
   turnsOn: true, maxTurns: 30,
@@ -40,6 +41,23 @@ const draft = {
   tone: 'default',
   hiddenAgenda: null as boolean | null,
 };
+
+const TOPIC_SHIFT = 6;   // 주제가 이만큼(글자 수) 넘게 고쳐지면 입장을 다시 맞출 때가 됐다고 본다
+const squash = (text: string): string => text.replace(/\s+/g, '');   // 띄어쓰기와 줄바꿈의 차이는 세지 않는다
+
+/** 두 글이 몇 글자 다른지(고쳐 쓰기·넣기·빼기의 수). limit에 닿으면 더 세지 않고 limit을 돌려준다. */
+function editDistance(a: string, b: string, limit: number): number {
+  const x = Array.from(a).slice(0, 600);
+  const y = Array.from(b).slice(0, 600);
+  if (Math.abs(x.length - y.length) >= limit) return limit;
+  let row = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i += 1) {
+    const next = [i];
+    for (let j = 1; j <= y.length; j += 1) next.push(Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1)));
+    row = next;
+  }
+  return Math.min(row[y.length], limit);
+}
 
 /* 진행 설정은 이 브라우저에 기억해 두고 다음에 그대로 쓴다. 쓰던 초안(주제, 자료, 참가자)은 아래에서 따로 기억한다. */
 const SETTING_KEYS = ['count', 'policy', 'avatarSet', 'moderator', 'mode', 'turnsOn', 'maxTurns', 'minutesOn', 'maxMinutes',
@@ -63,7 +81,7 @@ let droppedMaterials = 0;   // 지난번에 너무 커서 기억하지 못한 �
 
 function saveDraftNow(): void {
   window.clearTimeout(draftTimer);
-  const body = { topic: draft.topic, concept: draft.concept, urls: draft.urls, cast: draft.cast, prepCost: draft.prepCost };
+  const body = { topic: draft.topic, concept: draft.concept, urls: draft.urls, cast: draft.cast, prepCost: draft.prepCost, stanceTopic: draft.stanceTopic };
   try {
     localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...body, materials: draft.materials }));
   } catch {   // 자료가 커서 저장 한도를 넘으면 자료만 빼고 기억한다
@@ -91,6 +109,7 @@ function restoreDraft(): void {
       draft.cast = saved.cast.slice(0, 10).map((p: any) => (p && typeof p.name === 'string' && p.name && p.avatar && Array.isArray(p.claims) ? p as Slot : null));
     }
     if (typeof saved.prepCost === 'number' && saved.prepCost > 0) draft.prepCost = saved.prepCost;
+    draft.stanceTopic = typeof saved.stanceTopic === 'string' ? saved.stanceTopic : draft.topic;   // 예전 초안은 지금 주제에 맞춰져 있다고 본다
     droppedMaterials = Number(saved.dropped) || 0;
   } catch { /* 깨진 값은 무시한다 */ }
 }
@@ -167,7 +186,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   /* ---- 주제 ---- */
   const topic = h('textarea', {
     class: 'topic-input', placeholder: '토론할 주제를 적어 주세요. 한 줄도 좋고, 배경을 몇 문단 적어도 좋습니다.', rows: 3,
-    oninput: () => { draft.topic = topic.value; paintStart(); },
+    oninput: () => { draft.topic = topic.value; paintStart(); paintNudge(); },
   });
   topic.value = draft.topic;
   const concept = h('textarea', {
@@ -182,7 +201,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     !status ? h('div', { class: 'banner' }, '서버에 연결하지 못했습니다. 서버가 켜져 있는지 확인하세요.') : null,
     h('div', { class: 'panel frame topic-box' }, topic,
       h('div', { class: 'topic-foot' }, h('span', { class: 'muted small' }, '예시'),
-        EXAMPLES.map((text) => h('button', { type: 'button', class: 'chip', onclick: () => { topic.value = text; draft.topic = text; paintStart(); topic.focus(); } }, text)))),
+        EXAMPLES.map((text) => h('button', { type: 'button', class: 'chip', onclick: () => { topic.value = text; draft.topic = text; paintStart(); paintNudge(); topic.focus(); } }, text)))),
     h('div', { class: 'panel concept-box' },
       h('div', { class: 'concept-label' }, icon(Drama, 18), '컨셉과 분위기', h('small', null, '선택. 어떤 자리인지, 어떤 분위기인지. 주제에 못 적은 배경이나 바라는 점도 좋습니다. 참가자 모두에게 똑같이 적용됩니다')),
       concept,
@@ -326,6 +345,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
       draft.prepCost += cost ?? 0;
+      draft.stanceTopic = draft.topic;
       const picks = pickAvatars(draft.count, draft.avatarSet);
       draft.cast = Array.from({ length: draft.count }, (_, i) => {
         const p = personas[i];
@@ -340,6 +360,16 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       loading.clear();
       paintCast();
     }
+  }
+
+  /** 참가자의 입장을 맞춘 뒤로 주제가 눈에 띄게 바뀌었으면 "입장 새로 맞추기"를 은근히 강조한다.
+   *  띄어쓰기나 한두 글자 고친 것에는 반응하지 않는다: 고친 글자가 TOPIC_SHIFT자 이상일 때만이다. */
+  function paintNudge(): void {
+    const stale = draft.cast.some(Boolean) && !!draft.topic.trim() && editDistance(squash(draft.stanceTopic), squash(draft.topic), TOPIC_SHIFT) >= TOPIC_SHIFT;
+    refreshBtn.classList.toggle('btn--nudge', stale);
+    refreshBtn.dataset.tip = stale
+      ? '주제가 바뀌었습니다. 누르면 참가자는 그대로 두고, 지금 주제에 맞춰 각자의 관점·핵심 주장·양보 지점만 새로 씁니다'
+      : '참가자는 그대로 두고, 지금 주제에 맞춰 각자의 관점·핵심 주장·양보 지점만 새로 씁니다. 주제를 바꿨을 때 누르세요';
   }
 
   /** 참가자는 그대로 두고, 지금 주제에 맞춰 각자의 관점·핵심 주장·양보 지점만 새로 받는다. 빈 자리는 건드리지 않는다. */
@@ -363,6 +393,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
       draft.prepCost += cost ?? 0;
+      draft.stanceTopic = draft.topic;
       seats.forEach((i, k) => {
         const next = personas[k];
         const slot = draft.cast[i];
@@ -400,6 +431,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
       draft.prepCost += cost ?? 0;
+      draft.stanceTopic = draft.topic;
       if (personas.length < draft.count) {
         toast(`보관함에 인물이 ${size}명뿐이라 ${personas.length}명으로 구성했습니다.`);
         draft.count = Math.max(2, personas.length);
@@ -620,6 +652,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     const making = busy && !picking && !refreshing;
     genBtn.append(icon(making ? LoaderCircle : Sparkles, 18, making ? 'spin' : ''), making ? '만드는 중' : '가상 인물 생성');
     refreshBtn.disabled = busy || !draft.cast.some(Boolean);
+    paintNudge();
     clear(refreshBtn);
     refreshBtn.append(icon(refreshing ? LoaderCircle : RefreshCw, 18, refreshing ? 'spin' : ''), refreshing ? '맞추는 중' : '입장 새로 맞추기');
     pickBtn.disabled = busy;
