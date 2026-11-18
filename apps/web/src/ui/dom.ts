@@ -72,8 +72,11 @@ function showTip(target: HTMLElement): void {
     document.body.append(tipEl);
   }
   const build = richTips.get(target);
-  tipEl.className = build ? 'tip tip--card' : 'tip';
-  tipEl.replaceChildren(build ? build() : text);
+  const title = target.dataset.tipTitle;   // 제목이 있는 툴팁: 제목은 작은 금색 머리글로, 설명은 그 아래 본문으로
+  tipEl.className = build ? 'tip tip--card' : title ? 'tip tip--titled' : 'tip';
+  if (build) tipEl.replaceChildren(build());
+  else if (title) tipEl.replaceChildren(h('div', { class: 'tip-title' }, title), h('div', { class: 'tip-body' }, text));
+  else tipEl.replaceChildren(text);
   const rect = target.getBoundingClientRect();
   tipEl.classList.add('is-on');
   const box = tipEl.getBoundingClientRect();

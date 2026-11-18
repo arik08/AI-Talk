@@ -134,3 +134,5 @@ def test_library_personas_are_marked_as_characters_and_get_a_reminder():
     assert prompts.character_hint(base, "default") == ""
     assert prompts.character_hint({**base, "library": True}, "serious") == ""   # 진지한 분위기에서는 논증이 앞선다
     assert "캐릭터 인물" in prompts.RULES
+    assert "당신이 아는 것" in prompts.persona_block({**base, "library": True})   # 소개에 없는 지식도 쓰게 한다
+    assert "당신이 그 사람에 대해 이미 아는 것" in prompts.RULES

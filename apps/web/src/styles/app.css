@@ -237,6 +237,10 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
   pointer-events: none; opacity: 0; transform: translateY(3px); transition: opacity .12s var(--ease), transform .12s var(--ease);
 }
 .tip.is-on { opacity: 1; transform: none; }
+/* 제목이 있는 툴팁: 작은 금색 머리글 아래에 본문. 둘의 크기와 색을 달리해 위계를 준다 */
+.tip--titled { max-width: 24rem; padding: .625rem .875rem .75rem; box-shadow: 0 14px 36px rgb(var(--shadow-rgb) / .55); }
+.tip-title { margin-bottom: .375rem; padding-bottom: .3125rem; border-bottom: 1px solid var(--line); color: var(--gold); font-size: .8125rem; font-weight: 600; letter-spacing: .06em; }
+.tip-body { color: var(--text); font-size: .9375rem; line-height: 1.65; }
 /* 인물 카드 툴팁: 위에 인물 색 띠, 얼굴과 이름, 이 주제에서의 입장, 그 아래 분야·성격·말투 */
 .tip--card { width: 24rem; max-width: calc(100vw - 1rem); padding: 0; overflow: hidden; white-space: normal; font-size: .875rem; line-height: 1.6; box-shadow: 0 18px 44px rgb(var(--shadow-rgb) / .65); }
 .who { border-top: 2px solid var(--c); }

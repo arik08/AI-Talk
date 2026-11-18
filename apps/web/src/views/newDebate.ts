@@ -659,7 +659,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         p.viewpoint ? h('div', { class: 'pcard-view' }, p.viewpoint) : null,
         p.claims.length ? h('ul', { class: 'pcard-claims' }, p.claims.slice(0, 3).map((c) => h('li', null, c))) : null,
         h('div', { class: 'pcard-meta' },
-          p.personality ? h('span', { class: 'chip', tip: `성격과 토론 스타일\n${p.personality}` }, p.personality.length > 22 ? `${p.personality.slice(0, 22)}…` : p.personality) : null),
+          p.personality ? h('span', { class: 'chip', tip: p.personality, 'data-tip-title': '성격과 토론 스타일' }, p.personality.length > 22 ? `${p.personality.slice(0, 22)}…` : p.personality) : null),
         draft.perSpeaker ? modelSelects(p) : null,
         h('div', { class: 'pcard-foot' },
           h('div', { class: 'grow' }),

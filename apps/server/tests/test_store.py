@@ -97,6 +97,9 @@ def test_presets_are_the_famous_people_set():
         assert p["hidden"] == ""          # 실존 인물에게 숨은 속내를 지어 붙이지 않는다
     assert sorted(p["avatar"]["variant"] for p in people) == list(range(67))   # 인물마다 자기 얼굴 아바타 하나
     assert all(p["avatar"]["set"] == "figure" for p in people)
+    tags = {t for p in people for t in p["tags"]}   # 태그는 비슷한 것끼리 묶은 아홉 가지만 쓴다
+    assert tags == {"경영·산업", "투자·경제", "기술·AI", "과학·환경", "정치·외교", "철학·사상", "사회·문화", "역사 인물", "한국"}
+    assert all(1 <= len(p["tags"]) <= 4 for p in people)
 
 
 def test_old_preset_set_is_replaced_once_and_own_personas_are_kept(tmp_path, monkeypatch):
