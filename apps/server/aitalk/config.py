@@ -25,6 +25,10 @@ def _read_env_file(path: Path) -> dict[str, str]:
 
 USD_KRW = 1350.0   # 1달러 = 1,350원 고정
 
+# P-GPT 값의 별칭. 앞에 있는 이름이 우선한다
+PGPT_KEY_NAMES = ("PGPT_API_KEY", "API_KEY")
+PGPT_CODE_NAMES = ("PGPT_SYSTEM_CODE", "PGPT_EMPNO", "EMPLOYEE_NO")
+
 
 class Settings:
     """`.env`를 먼저 보고, 없을 때만 OS 환경 변수를 본다.
@@ -43,6 +47,32 @@ class Settings:
         if value is None or value == "":
             value = os.environ.get(key, "")
         return value or default
+
+    def first(self, *keys: str, default: str = "") -> str:
+        """별칭 묶음에서 처음으로 값이 있는 것. `.env` 전체를 먼저 보고, 없을 때만 OS 환경 변수를 본다.
+
+        빈 값은 없는 것으로 보고 다음 후보로 넘어간다.
+        """
+        for key in keys:
+            value = (self._file.get(key) or "").strip()
+            if value:
+                return value
+        for key in keys:
+            value = (os.environ.get(key) or "").strip()
+            if value:
+                return value
+        return default
+
+    @property
+    def pgpt(self) -> dict:
+        """P-GPT 연결에 쓰는 값. 비밀값이 들어 있으므로 화면이나 로그에 내보내지 않는다."""
+        return {
+            "api_key": self.first(*PGPT_KEY_NAMES),
+            "system_code": self.first(*PGPT_CODE_NAMES),
+            "company_code": self.first("COMPANY_CODE", default="30"),
+            "base_url": self.first("PGPT_BASE_URL"),
+            "search_tool": self.first("PGPT_WEB_SEARCH_TOOL"),
+        }
 
     @property
     def provider(self) -> str:

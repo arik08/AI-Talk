@@ -1,7 +1,7 @@
 """어느 AI를 쓸지 고른다.
 
 우선순위: 시험용 강제값(AITALK_FORCE_PROVIDER) > 설정 화면에서 마지막에 고른 것 > .env의 AITALK_PROVIDER.
-키는 언제나 .env에서 읽는다.
+키는 .env에서 먼저 찾고, 없을 때만 OS 환경 변수에서 찾는다 (config.Settings.first).
 """
 from __future__ import annotations
 
@@ -52,10 +52,7 @@ def build(name: str) -> Provider:
         provider: Provider = ClaudeProvider(settings.get("ANTHROPIC_API_KEY"))
     elif name == "pgpt":
         from .pgpt import PgptProvider
-        provider = PgptProvider(
-            api_key=settings.get("PGPT_API_KEY"), empno=settings.get("PGPT_EMPNO"),
-            system_code=settings.get("PGPT_SYSTEM_CODE"), base_url=settings.get("PGPT_BASE_URL"),
-            search_tool=settings.get("PGPT_WEB_SEARCH_TOOL"))
+        provider = PgptProvider(**settings.pgpt)
     else:
         from .mock import MockProvider
         provider = MockProvider()

@@ -7,7 +7,7 @@ import { clear, fmtCost, h, icon, put, toast } from '../ui/dom';
 
 const PROVIDERS: [string, string, string][] = [
   ['claude', 'Claude', '집에서 개발할 때. ANTHROPIC_API_KEY가 필요합니다'],
-  ['pgpt', 'P-GPT', '회사 OA망에서. PGPT_API_KEY와 PGPT_EMPNO가 필요합니다'],
+  ['pgpt', 'P-GPT', '회사 OA망에서. PGPT_API_KEY(또는 API_KEY)와 PGPT_EMPNO(또는 PGPT_SYSTEM_CODE, EMPLOYEE_NO)가 필요합니다'],
   ['mock', '시험용', 'AI를 부르지 않고 화면만 확인합니다. 요금이 들지 않습니다'],
 ];
 const MOODS = Object.keys(MOOD_LABEL) as Mood[];
@@ -51,7 +51,8 @@ export function mountSettings(root: HTMLElement, ctx: AppContext): () => void {
               const ready = row ? row.ready : active && s.ready;
               return h('tr', null,
                 h('td', null, h('b', null, name), ' ', h('span', { class: 'muted small' }, key)),
-                h('td', { class: 'muted' }, note),
+                h('td', { class: 'muted' }, note,
+                  !ready && row?.message ? h('div', { class: 'small', style: 'margin-top:.25rem;color:var(--ember)' }, row.message) : null),
                 h('td', null, ready ? h('span', { class: 'chip chip--c', style: '--c:#2FC23A' }, '준비됨')
                   : h('span', { class: 'chip chip--ember', tip: row?.message || '키가 없습니다' }, '키 없음')),
                 h('td', { style: 'text-align:right' }, active

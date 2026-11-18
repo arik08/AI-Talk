@@ -3,7 +3,9 @@
     python scripts/check_pgpt.py            # 기본 모델(gpt-6-luna)로 점검
     python scripts/check_pgpt.py gpt-6.1-sol
 
-.env의 PGPT_API_KEY, PGPT_EMPNO(또는 PGPT_SYSTEM_CODE)를 쓴다. 키 값은 출력하지 않는다.
+키는 PGPT_API_KEY -> API_KEY, 코드는 PGPT_SYSTEM_CODE -> PGPT_EMPNO -> EMPLOYEE_NO 순서로 찾는다
+(.env를 먼저, 없으면 Windows 환경 변수). 키 값은 출력하지 않는다.
+상태 유지·검색·압축·기억 복구를 실제 호출로 더 깊이 보려면 scripts/check_pgpt_context.py --execute 를 쓴다.
 결과 표에서 '안 됨'으로 나온 항목은 설계 문서 14번의 대안으로 넘어가야 한다.
 """
 from __future__ import annotations
@@ -18,7 +20,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 from aitalk.config import settings  # noqa: E402
-from aitalk.providers.pgpt import DEFAULT_BASE_URL, MODELS, build_token, normalize_base_url  # noqa: E402
+from aitalk.providers.pgpt import DEFAULT_BASE_URL, MODELS, NOT_CONFIGURED, build_token, normalize_base_url  # noqa: E402
 
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "gpt-6-luna"
 RESULTS: list[tuple[str, str, str]] = []
@@ -44,14 +46,14 @@ async def text_of(stream) -> tuple[str, object, list[str]]:
 
 
 async def main() -> None:
-    key = settings.get("PGPT_API_KEY")
-    code = settings.get("PGPT_SYSTEM_CODE") or settings.get("PGPT_EMPNO")
+    conf = settings.pgpt
+    key, code = conf["api_key"], conf["system_code"]
     if not key or not code:
-        print(".env에 PGPT_API_KEY와 PGPT_EMPNO(또는 PGPT_SYSTEM_CODE)를 먼저 채워 주세요.")
+        print(NOT_CONFIGURED)
         return
     from openai import AsyncOpenAI
-    base = normalize_base_url(settings.get("PGPT_BASE_URL") or DEFAULT_BASE_URL)
-    client = AsyncOpenAI(api_key=build_token(key, code), base_url=base, timeout=120)
+    base = normalize_base_url(conf["base_url"] or DEFAULT_BASE_URL)
+    client = AsyncOpenAI(api_key=build_token(key, code, conf["company_code"]), base_url=base, timeout=120)
     print(f"주소: {base}\n모델: {MODEL}\n")
 
     # 1. 모델 목록
