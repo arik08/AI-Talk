@@ -237,6 +237,8 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
   pointer-events: none; opacity: 0; transform: translateY(3px); transition: opacity .12s var(--ease), transform .12s var(--ease);
 }
 .tip.is-on { opacity: 1; transform: none; }
+.info-tip { display: inline-flex; margin-left: .375rem; vertical-align: -.15em; color: var(--muted); cursor: help; }
+.info-tip:hover { color: var(--gold-hi); }
 .toasts { position: fixed; z-index: 90; right: 1.5rem; bottom: 1.5rem; display: flex; flex-direction: column; gap: .5rem; align-items: flex-end; }
 .toast {
   max-width: 30rem; padding: .625rem 1rem; background: var(--pop); border: 1px solid var(--line-hi); border-left: 3px solid var(--gold);

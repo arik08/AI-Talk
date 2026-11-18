@@ -1,5 +1,5 @@
 import {
-  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, ListOrdered, LoaderCircle, Megaphone, MessagesSquare, Pause,
+  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, Info, ListOrdered, LoaderCircle, Megaphone, MessagesSquare, Pause,
   PenLine, Play, Rewind, Scale, Search, Send, SkipForward, StepForward, TriangleAlert, Trophy, Zap, type IconNode,
 } from 'lucide';
 import { api } from '../api';
@@ -15,6 +15,11 @@ import { drawSpeech, renderSpeech, speechBlocks, speechLength } from '../ui/spee
 interface Seat { persona: Persona; tile: HTMLElement; av: HTMLElement; urge: HTMLElement; status: HTMLElement; badge: HTMLElement }
 interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; av: HTMLElement; speaker: string; cut: boolean; started: boolean; raw: string; times: number[] }
 const CH_IN_MS = 550;   // 글자 하나가 나타나는 움직임의 길이 (app.css의 ch-in과 같다)
+
+/** 덧붙이는 설명은 늘 보이게 두지 않고, 정보 아이콘에 마우스를 올렸을 때 보여 준다. */
+function infoTip(text: string): HTMLElement {
+  return h('span', { class: 'info-tip', role: 'img', 'aria-label': text, tip: text }, icon(Info, 15));
+}
 
 const SPEEDS: [string, string][] = [['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']];
 const CPS: Record<string, number> = { slow: 8, normal: 14, fast: 26 };   // 서버가 글자를 내보내는 속도와 같다
@@ -138,7 +143,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
           h('span', null, '캐시에 쓴 입력'), h('span', null, `${t.cache_write.toLocaleString()} 토큰`),
           h('span', null, '출력'), h('span', null, `${t.output.toLocaleString()} 토큰`),
           h('span', null, '웹 검색'), h('span', null, `${Number(t.searches ?? 0).toLocaleString()}건`),
-          h('span', null, '예상 비용'), h('span', null, fmtCost(Number(usage.cost ?? 0), money.rate)),
+          h('span', null, '예상 비용', infoTip(`측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 웹 검색은 건당 ${fmtCost(money.searchUsd, money.rate)}, 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`)),
+          h('span', null, fmtCost(Number(usage.cost ?? 0), money.rate)),
           h('span', null, 'AI 호출'), h('span', null, (() => {
             const calls = usage.calls ?? {};
             const director = calls.director ?? 0;
@@ -148,8 +154,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         h('h4', { style: 'margin-top:1.25rem' }, '화자별 출력'),
         h('div', { class: 'kv' }, Object.entries(usage.by ?? {}).flatMap(([who, u]: [string, any]) => [
           h('span', null, who === 'director' ? '연출자(안 보임)' : seats.get(who)?.persona.name ?? who),
-          h('span', null, `${u.output.toLocaleString()} 토큰`)])),
-        h('p', { class: 'muted small', style: 'margin-top:1rem' }, `측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 웹 검색은 건당 ${fmtCost(money.searchUsd, money.rate)}, 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`));
+          h('span', null, `${u.output.toLocaleString()} 토큰`)])));
     } else if (tab === 'sources') {
       if (!registry.size) { sideBody.append(h('p', { class: 'muted' }, '웹에서 찾은 출처가 없습니다.')); return; }
       const list = sourceList(registry.list(), registry);
@@ -578,15 +583,15 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const t = usage?.total ?? record?.usage;
     const old = costEl;
     const fresh = h('div', { class: `panel frame summary costcard${old ? ' is-redraw' : ''}` },
-      h('div', { class: 'minutes-tag' }, icon(Coins, 16), '총 비용'),
+      h('div', { class: 'minutes-tag' }, icon(Coins, 16), '총 비용',
+        infoTip(`측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`)),
       h('h2', null, fmtCost(money.cost, money.rate)),
       h('div', { class: 'cost-rows' },
         row('토론 (토큰)', p.tokens ?? money.cost, t ? `입력 ${(t.input + t.cached + t.cache_write).toLocaleString()} · 출력 ${t.output.toLocaleString()} 토큰` : ''),
         row('웹 검색', p.search ?? 0, `${money.searches.toLocaleString()}건 × ${fmtCost(money.searchUsd, money.rate)}`),
         (p.prep ?? 0) > 0 ? row('참가자 생성', p.prep) : null,
         (p.minutes ?? 0) > 0 ? row('회의록', p.minutes) : null,
-        (p.extra ?? 0) > 0 ? row('판정과 질문', p.extra, '토론이 끝난 뒤에 든 비용') : null),
-      h('p', { class: 'muted small' }, `측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`));
+        (p.extra ?? 0) > 0 ? row('판정과 질문', p.extra, '토론이 끝난 뒤에 든 비용') : null));
     old?.remove();
     inner.append(fresh);
     costEl = fresh;
