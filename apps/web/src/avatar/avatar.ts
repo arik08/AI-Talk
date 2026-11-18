@@ -26,7 +26,7 @@ export const AVATAR_SETS: { id: AvatarSet; label: string; note: string; first: n
   { id: 'orb', label: '정령', note: '고리가 도는 빛의 핵. 회전 속도와 파동으로 감정을 드러냅니다', first: 0, count: 6 },
   { id: 'crest', label: '문장', note: '문양을 담은 금빛 틀. 틀과 문양이 함께 움직입니다', first: 1, count: 16 },
   // 인물은 보관함의 유명인 전용이다. 자동 생성한 참가자에게 무작위로 붙이지 않는다 (pickAvatars, RANDOM_SETS)
-  { id: 'figure', label: '인물', note: '보관함의 유명인을 알아볼 수 있게 그린 얼굴. 머리 모양·모자·수염·안경으로 구분하고, 눈썹과 입은 감정대로 움직입니다', first: 0, count: 22 },
+  { id: 'figure', label: '인물', note: '보관함의 유명인을 알아볼 수 있게 그린 얼굴. 머리 모양·모자·수염·안경으로 구분하고, 눈썹과 입은 감정대로 움직입니다', first: 0, count: FIGURES.length },
 ];
 
 /** 자동 생성한 참가자에게 무작위로 붙일 수 있는 세트. */

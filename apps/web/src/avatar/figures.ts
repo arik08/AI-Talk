@@ -224,6 +224,48 @@ export const FIGURES: Figure[] = [
     front: p('M43 79 L57 79 L55.5 93 L50 96.5 L44.5 93Z', WHITE),
     marks: NOSE.long,
     hair: p('M28 43 Q28 17 50 16 Q72 17 72 43 Q64 29.5 50 28.5 Q36 29.5 28 43Z', '#B9A58B') + l('M50 16 L50 28', '#8C7B66', 1) },
+
+  // 짧게 깎은 희끗한 머리, 가는 사각 안경, 갸름한 얼굴, 짙은 재킷과 어두운 니트
+  { name: '데미스 하사비스', skin: '#E6BC96', face: 'long', brow: '#3A3230',
+    clothes: shoulders('#23283A'), front: p('M41 81 Q50 90 59 81 L57 78.5 L43 78.5Z', '#3B4256') + lapels,
+    marks: NOSE.long + FOREHEAD + l('M38 62 Q36 68 39 73', SH, 1, 0.8) + l('M62 62 Q64 68 61 73', SH, 1, 0.8),
+    hair: p('M28 43 Q26 18 50 18 Q74 18 72 43 Q69 29 60 26.5 Q50 23.5 40 26.5 Q31 29 28 43Z', '#4A4442')
+      + both((f) => soft(`M${f(28.5)} 44 Q${f(27.5)} 34 ${f(31)} 29 L${f(32.5)} 40Z`, '#A9A6A2', 0.9)),
+    over: `<g fill="none" stroke="#2E2E33" stroke-width="1.5"><rect x="30" y="45" width="18" height="12" rx="3"/><rect x="52" y="45" width="18" height="12" rx="3"/><path d="M48 49.5 L52 49.5"/><path d="M30 49.5 L25 48"/><path d="M70 49.5 L75 48"/></g>` },
+
+  // 풍성한 갈색 곱슬머리, 둥근 뿔테 안경, 짧은 수염 자국, 재킷과 깃 없는 셔츠
+  { name: '다리오 아모데이', skin: '#EDC5A2', face: 'oval', brow: '#4A3324',
+    clothes: shoulders('#3A4252'), front: p('M41 81 Q50 90 59 81 L57 78.5 L43 78.5Z', '#D9DDE4') + lapels,
+    marks: NOSE.soft + SMILE_LINES,
+    hair: [[27, 38], [29, 28], [36, 21], [45, 17], [55, 17], [64, 21], [71, 28], [73, 38], [40, 26], [50, 23], [60, 26], [33, 33], [67, 33]]
+      .map(([x, y]) => c(x, y, 6.6, '#4A3324', 0.9)).join('')
+      + soft('M30 38 Q32 24 50 23 Q68 24 70 38 Q60 31 50 31 Q40 31 30 38Z', '#4A3324', 1),
+    beard: soft('M29 58 Q30 78 50 85.5 Q70 78 71 58 Q66 73 50 75 Q34 73 29 58Z', '#4A3324', 0.28),
+    over: glassesRound('#2B211B', 1.7) },
+
+  // 민머리, 짙은 눈썹, 각진 턱, 짙은 재킷에 단추를 푼 셔츠
+  { name: '제프 베이조스', skin: '#EFC6A4', face: 'square', brow: '#3A2C24', browH: 3.6,
+    clothes: shoulders('#1E2230'), front: p('M42 81 L47 92 L50 88 L53 92 L58 81 L55 78.5 L45 78.5Z', '#DCE6F2') + lapels,
+    marks: NOSE.big + SMILE_LINES + soft('M36 24 Q44 20 52 22 Q44 23.5 36 27Z', '#FFFFFF', 0.35)
+      + l('M38 32 Q50 29.5 62 32', SH, 0.9, 0.7) },
+
+  // 짧고 촘촘한 곱슬머리, 흰 피부, 넓은 이마, 헐렁한 회색 티셔츠와 가는 목걸이
+  { name: '마크 저커버그', skin: '#F4D3B8', face: 'oval', brow: '#7A5A3C',
+    clothes: shoulders('#6B7280'), front: p('M40 82 Q50 91 60 82 L58 79 L42 79Z', '#7C8491') + l('M44 83 Q50 89 56 83', '#E3C55A', 1),
+    marks: NOSE.soft,
+    hair: [[28, 34], [31, 26], [37, 21], [44, 18.5], [50, 18], [56, 18.5], [63, 21], [69, 26], [72, 34]]
+      .map(([x, y]) => c(x, y, 5.2, '#8A6644', 0.9)).join('')
+      + soft('M29 37 Q31 23 50 22 Q69 23 71 37 Q62 29.5 50 29.5 Q38 29.5 29 37Z', '#8A6644', 1) },
+
+  // 넘긴 은발, 가는 금속테 안경, 검은 가죽 재킷
+  { name: '젠슨 황', skin: '#E8BD96', face: 'oval', brow: '#6E6E6E',
+    clothes: shoulders('#121214') + l('M20 97 Q30 89 40 85', '#3A3A40', 1.2) + l('M80 97 Q70 89 60 85', '#3A3A40', 1.2),
+    front: p('M41 81 Q50 89 59 81 L57 78.5 L43 78.5Z', '#1D1D21')
+      + p('M42 81 L36 86 L45 99 L49 90Z', '#1A1A1D') + p('M58 81 L64 86 L55 99 L51 90Z', '#1A1A1D'),
+    marks: NOSE.soft + SMILE_LINES + UNDER_EYES,
+    hair: p('M25 45 Q20 15 52 15 Q82 16 75 45 Q73 30 60 27 Q44 24 33 30 Q27 34 25 45Z', '#C9C9CC')
+      + l('M30 29 Q50 18 72 27', '#9A9AA0', 1) + l('M34 25 Q52 16 68 22', '#9A9AA0', 0.9),
+    over: glassesThin('#5A5A60') },
 ];
 
 /** 둥근 틀 안에 들어가는 그림(눈썹·눈·입 아래). */
