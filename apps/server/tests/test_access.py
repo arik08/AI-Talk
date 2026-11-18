@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from aitalk import app as app_module  # noqa: E402
-from aitalk import store  # noqa: E402
+from aitalk import prompts, store  # noqa: E402
 from aitalk.config import settings  # noqa: E402
 from aitalk.providers.mock import MockProvider  # noqa: E402
 
@@ -113,6 +113,23 @@ def test_cast_from_library_picks_existing_personas_and_adapts_their_stance(monke
     for pid in list(library)[1:]:
         client.delete(f"/api/personas/{pid}")
     assert client.post("/api/cast/library", json={"topic": "주제", "count": 3}).status_code == 400   # 고를 사람이 모자라다
+
+
+def test_persona_suggest_returns_only_library_people_in_order(monkeypatch, tmp_path):
+    """인물 추천: 보관함에 있는 사람만, 겹치지 않게, 추천한 순서대로 까닭과 함께 돌려준다."""
+    client = _client(monkeypatch, tmp_path)
+    res = client.post("/api/personas/suggest", json={"query": "투자자"})
+    assert res.status_code == 200, res.text
+    picks = res.json()["picks"]
+    library = {p["id"]: p for p in store.list_personas()}
+    assert picks and all(p["id"] in library and p["why"] for p in picks)        # 목록에 없는 id는 버린다
+    assert len({p["id"] for p in picks}) == len(picks) <= prompts.SUGGEST_MAX
+    assert all("투자자" in json.dumps(library[p["id"]], ensure_ascii=False) for p in picks)
+    assert res.json()["cost"] >= 0
+    assert client.post("/api/personas/suggest", json={"query": "  "}).status_code == 400
+    lib = [{"id": "a", "name": "가"}, {"id": "b", "name": "나"}]
+    assert prompts.clean_suggestions([{"id": "[b]", "why": "까닭"}, {"id": "b", "why": "또"}, {"id": "x", "why": ""}, "글"], lib) == [{"id": "b", "why": "까닭"}]
+    assert "★ [a]" in prompts.suggest_prompt("찾는 말", [{**lib[0], "fav": True}, lib[1]])
 
 
 def test_cast_refresh_keeps_the_people_and_only_rewrites_their_stance(monkeypatch, tmp_path):

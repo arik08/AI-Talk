@@ -79,6 +79,8 @@ export const api = {
   savePersona: (p: Persona) => request<Persona>('/api/personas', json(p)),
   deletePersona: (id: string) => request<{ ok: boolean }>(`/api/personas/${id}`, { method: 'DELETE' }),
   favoritePersona: (id: string, on: boolean) => request<{ id: string; fav: boolean }>(`/api/personas/${id}/favorite`, json({ on })),
+  /** 말로 적은 조건에 맞는 보관함 인물을 AI가 추천한다. 잘 맞는 순서로, 까닭 한 줄과 함께 온다. */
+  suggestPersonas: (query: string) => request<{ picks: { id: string; why: string }[]; cost?: number }>('/api/personas/suggest', json({ query })),
   importPersonas: (items: unknown[]) => request<{ added: number }>('/api/personas/import', json(items)),
   draftPersona: (hint: string) => request<Partial<Persona>>('/api/personas/draft', json({ hint })),
   cast: (body: { topic: string; concept?: string; tone?: string; count: number; policy: string; fixed: Partial<Persona>[]; materials: string; model?: string; effort?: string }) =>

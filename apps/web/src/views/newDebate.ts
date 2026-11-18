@@ -6,6 +6,7 @@ import { spreadColors } from '../colors';
 import { AVATAR_SETS, RANDOM_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { PALETTE, type AvatarSet, type Mood, type Persona } from '../types';
+import { aiSearch, arrangeRows, type Pick } from '../ui/aiSearch';
 import { clear, deleteButton, favButton, fmtUsd, h, icon, put, safeColor, toast } from '../ui/dom';
 
 interface Slot extends Persona { fromLibrary?: boolean; ownColor?: string }   // ownColor: 앞사람과 겹쳐 색을 바꾸기 전의 자기 색
@@ -484,20 +485,20 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     for (const id of chosen) if (!people.some((p) => p.id === id)) chosen.delete(id);
     const box = h('div', { class: 'menu pick-menu' });
     menu = box;
-    // 검색창은 한 번만 만들고, 글자를 칠 때는 목록을 다시 그리지 않고 안 맞는 줄만 숨긴다 (줄의 순서가 people과 같게 유지된다)
-    const search = h('input', { class: 'input', type: 'search', placeholder: '이름, 직함, 분야로 찾기', 'aria-label': '인물 찾기',
-      oninput: () => sift(box.querySelector('.pick-list') as HTMLElement) });
+    // 검색창은 한 번만 만들고, 글자를 칠 때는 목록을 다시 그리지 않고 안 맞는 줄만 숨긴다.
+    // 검색창 안의 반짝이 버튼을 켜면 찾는 사람을 말로 적어 AI의 추천을 받는다 (추천한 순서대로, 까닭과 함께)
+    let query = '';
+    let picks: Pick[] | null = null;
+    let rowEls: HTMLElement[] = [];   // rowEls[i]는 people[i]의 줄
     const none = h('div', { class: 'pick-none muted' }, '찾는 인물이 없습니다');
     const sift = (list: HTMLElement) => {
-      const q = search.value.trim().toLowerCase();
-      let shown = 0;
-      people.forEach((p, i) => {
-        const hit = !q || [p.name, p.title, p.expertise, ...(p.tags ?? [])].join(' ').toLowerCase().includes(q);
-        (list.children[i] as HTMLElement).hidden = !hit;
-        if (hit) shown++;
-      });
-      none.hidden = shown > 0 || !people.length;
+      none.hidden = arrangeRows(people, rowEls, list, null, query, picks) > 0 || !people.length;
     };
+    const search = aiSearch({
+      onText: (q) => { query = q; sift(box.querySelector('.pick-list') as HTMLElement); },
+      onPicks: (p) => { picks = p; sift(box.querySelector('.pick-list') as HTMLElement); },
+      onCost: (cost) => { draft.prepCost += cost; saveDraft(); },
+    }).root;
     const paint = () => {
       const room = Math.min(draft.count, people.length);
       while (chosen.size > room) chosen.delete([...chosen].pop()!);   // 정원을 줄였으면 나중에 고른 사람부터 뺀다
@@ -512,18 +513,18 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         void pickFromLibrary(picked);
       } }, icon(Sparkles, 18), h('span', null, h('div', null, '자동선택'), h('div', { class: 'muted' }, note)));
       const list = h('div', { class: 'pick-list', role: 'group', 'aria-label': '직접 넣을 인물' });
+      rowEls = [];
       for (const p of people) {
         const on = chosen.has(p.id!);
         const av = createAvatar(p.avatar, p.color, 32);
         av.classList.add('is-still');
-        list.append(h('div', { class: 'pick-row' }, h('button', { type: 'button', role: 'checkbox', 'aria-checked': String(on), class: on ? 'is-on' : '',
+        rowEls.push(h('div', { class: 'pick-row' }, h('button', { type: 'button', role: 'checkbox', 'aria-checked': String(on), class: on ? 'is-on' : '',
           disabled: !on && left <= 0, onclick: () => {
             if (on) chosen.delete(p.id!); else chosen.add(p.id!);
             const top = list.scrollTop;
             paint();
-            const next = box.querySelector('.pick-list') as HTMLElement;
-            next.scrollTop = top;
-            (next.children[people.indexOf(p)].firstElementChild as HTMLElement).focus();
+            (box.querySelector('.pick-list') as HTMLElement).scrollTop = top;
+            (rowEls[people.indexOf(p)].firstElementChild as HTMLElement).focus();
           } }, icon(on ? SquareCheck : Square, 18, 'pick-check'), av,
           h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))),
           favButton(p, (fav) => api.favoritePersona(p.id!, fav), { cls: '' })));
@@ -546,16 +547,15 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     if (!items.length) menu.append(h('div', { class: 'muted small', style: 'padding:.5rem .625rem' }, '고를 인물이 없습니다. 페르소나 메뉴에서 만들 수 있습니다.'));
     const rows: HTMLElement[] = [];
     const none = h('div', { class: 'muted small', style: 'padding:.5rem .625rem', hidden: true }, '찾는 인물이 없습니다');
-    const search = h('input', { class: 'input', type: 'search', placeholder: '이름, 직함, 분야로 찾기', 'aria-label': '인물 찾기', oninput: () => {
-      const q = search.value.trim().toLowerCase();
-      let shown = 0;
-      items.forEach((p, i) => {
-        const hit = !q || [p.name, p.title, p.expertise, ...(p.tags ?? [])].join(' ').toLowerCase().includes(q);
-        rows[i].hidden = !hit;
-        if (hit) shown++;
-      });
-      none.hidden = shown > 0;
-    } });
+    const box = menu;
+    let query = '';
+    let picks: Pick[] | null = null;
+    const sift = () => { none.hidden = arrangeRows(items, rows, box, none, query, picks) > 0; };
+    const search = aiSearch({
+      onText: (q) => { query = q; sift(); },
+      onPicks: (p) => { picks = p; sift(); },
+      onCost: (cost) => { draft.prepCost += cost; saveDraft(); },
+    }).root;
     if (items.length) menu.append(h('div', { class: 'menu-search' }, search));
     for (const p of items) {
       const av = createAvatar(p.avatar, p.color, 32);

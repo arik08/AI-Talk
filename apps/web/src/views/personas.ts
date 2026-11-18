@@ -3,6 +3,7 @@ import { api } from '../api';
 import { AVATAR_SETS, FIGURES, createAvatar, normalizeSpec, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { MOOD_LABEL, PALETTE, type AvatarSet, type Mood, type Persona } from '../types';
+import { aiSearch, matchesText, type Pick } from '../ui/aiSearch';
 import { clear, deleteButton, favButton, h, icon, safeColor, toast } from '../ui/dom';
 
 const MOODS = Object.keys(MOOD_LABEL) as Mood[];
@@ -19,12 +20,13 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
   let query = '';
   let tag = '';
   let favOnly = false;
+  let picks: Pick[] | null = null;   // AI가 추천한 인물. 있으면 찾는 말 대신 이것으로 거르고, 추천한 순서대로 놓는다
   let drawer: HTMLElement | null = null;
 
   const grid = h('div', { class: 'cast-grid' });
   const tagBar = h('div', { class: 'row' });
   const countNote = h('span', { class: 'page-count', 'aria-live': 'polite' });   // 보관함의 인원수. 찾거나 태그로 좁혔으면 그중 몇 명인지도
-  const search = h('input', { class: 'input', type: 'search', placeholder: '이름, 직함, 분야로 찾기', oninput: () => { query = search.value.trim().toLowerCase(); paint(); } });
+  const search = aiSearch({ onText: (q) => { query = q; paint(); }, onPicks: (p) => { picks = p; paint(); } }).root;
   const fileInput = h('input', { type: 'file', class: 'hidden', accept: '.json' });
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files?.[0];
@@ -63,8 +65,11 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
     tagBar.append(h('button', { type: 'button', class: `chip chip--fav${favOnly ? ' is-on' : ''}`, 'aria-pressed': String(favOnly),
       onclick: () => { favOnly = !favOnly; paint(); } }, icon(Star, 14), `즐겨찾기 ${people.filter((p) => p.fav).length}`));
     tags.forEach((t) => tagBar.append(h('button', { type: 'button', class: `chip${tag === t ? ' is-on' : ''}`, onclick: () => { tag = tag === t ? '' : t; paint(); } }, t)));
+    const why = new Map((picks ?? []).map((p) => [p.id, p.why]));
+    const rank = new Map((picks ?? []).map((p, i) => [p.id, i]));
     const shown = people.filter((p) => (!favOnly || p.fav) && (!tag || (p.tags ?? []).includes(tag))
-      && (!query || [p.name, p.title, p.expertise, ...(p.tags ?? [])].join(' ').toLowerCase().includes(query)));
+      && (picks ? rank.has(p.id!) : matchesText(p, query)));
+    if (picks) shown.sort((a, b) => rank.get(a.id!)! - rank.get(b.id!)!);
     countNote.textContent = shown.length === people.length ? `${people.length}명` : `${people.length}명 중 ${shown.length}명`;
     clear(grid);
     if (!shown.length) {
@@ -83,6 +88,7 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
             onclick: () => { k += 1; setAvatar(av, { mood: MOODS[k % MOODS.length], state: k % 2 ? 'speaking' : 'listening' }); } }, av),
           h('div', { class: 'grow' }, h('div', { class: 'pcard-name' }, p.name), h('div', { class: 'pcard-title' }, p.title)),
           favButton(p, (on) => api.favoritePersona(p.id!, on), { size: 20, after: () => { if (favOnly) paint(); else paintFavChip(); } })),
+        why.get(p.id!) ? h('div', { class: 'ai-why' }, icon(Sparkles, 14), why.get(p.id!)!) : null,
         p.personality ? h('div', { class: 'pcard-view' }, p.personality) : null,
         p.speech ? h('div', { class: 'muted small' }, `말투: ${p.speech}`) : null,
         h('div', { class: 'pcard-meta' }, p.expertise ? h('span', { class: 'chip chip--c' }, p.expertise) : null,

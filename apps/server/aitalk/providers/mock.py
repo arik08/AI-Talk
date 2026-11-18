@@ -244,6 +244,13 @@ class MockProvider(Provider):
     async def _json(self, prompt: str, schema: dict) -> tuple[dict, Usage]:
         await asyncio.sleep(self.latency)
         props = schema.get("properties", {})
+        if "picks" in props:
+            # 인물 추천: 찾는 말이 이름·직함·분야에 들어 있는 사람을, 없으면 목록의 앞 세 명을 추천한 것처럼 돌려준다
+            query = (re.search(r"사용자가 찾는 사람:\n(.*)", prompt) or ["", ""])[1].strip()
+            rows = re.findall(r"^- (?:★ )?\[([^\]]+)\] (.*)$", prompt, re.MULTILINE)
+            hits = [pid for pid, rest in rows if query and any(word in rest for word in query.split())] or [pid for pid, _ in rows[:3]]
+            return {"picks": [{"id": pid, "why": "찾는 조건과 분야가 맞습니다"} for pid in hits[:8]]
+                    + [{"id": "없는사람", "why": ""}]}, Usage(input=400, output=120)
         if "id" in props.get("personas", {}).get("items", {}).get("properties", {}):
             # 보관함에서 고르기: 후보 목록의 앞에서부터 고르고 입장을 주제에 맞춘 것처럼 채운다
             m = re.search(r"참가자 (\d+)명", prompt)

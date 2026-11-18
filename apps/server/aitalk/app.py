@@ -149,6 +149,33 @@ async def persona_delete(persona_id: str) -> dict:
     return {"ok": True}
 
 
+class SuggestIn(BaseModel):
+    query: str
+    model: Optional[str] = None
+    effort: Optional[str] = None
+
+
+@app.post("/api/personas/suggest")
+async def persona_suggest(body: SuggestIn) -> dict:
+    """말로 적은 조건("원전에 찬성할 만한 과학자")에 맞는 보관함 인물을 AI가 추천한다. 잘 맞는 순서로 돌려준다."""
+    query = body.query.strip()[:500]
+    if not query:
+        raise HTTPException(400, "어떤 사람을 찾는지 적어 주세요.")
+    library = [p for p in store.list_personas() if p.get("id") and p.get("name")]
+    if not library:
+        return {"picks": [], "cost": 0}
+    provider = get_provider()
+    used = body.model or provider.default_model
+    try:
+        data, usage = await provider.generate_json(
+            system=prompts.SUGGEST_SYSTEM, prompt=prompts.suggest_prompt(query, library),
+            schema=prompts.suggest_schema(), model=used, effort=body.effort or provider.default_effort)
+    except ProviderError as exc:
+        raise _fail(exc) from exc
+    price = next((m.price for m in await provider.list_models() if m.id == used), None)
+    return {"picks": prompts.clean_suggestions(data.get("picks"), library), "cost": round(usage.cost(price), 5)}
+
+
 class FavoriteIn(BaseModel):
     on: bool = True
 

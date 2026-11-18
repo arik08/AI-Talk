@@ -397,6 +397,53 @@ def pick_prompt(topic: str, count: int, policy: str, library: list[dict], materi
     return "\n".join(lines)
 
 
+SUGGEST_SYSTEM = """당신은 토론 프로그램의 캐스팅 담당입니다. 사용자가 어떤 사람을 찾는지 말로 적으면, 보관함의 인물 가운데 거기에 맞는 사람을 추천합니다.
+
+- 반드시 후보 목록에 있는 인물만 추천합니다. id는 목록에 적힌 그대로 옮겨 적습니다. 같은 사람을 두 번 적지 않습니다.
+- 가장 잘 맞는 사람부터 차례로 적습니다. 맞는 사람만 적고, 억지로 수를 채우지 않습니다. 맞는 사람이 없으면 빈 목록을 냅니다.
+- 후보 목록의 소개는 요약입니다. 실존 인물과 역사 속 인물은 그 사람에 대해 당신이 아는 것도 함께 써서 판단합니다.
+- 사용자가 주제나 상황을 적었으면 그 자리에서 할 말이 있을 사람을, 성격이나 조건을 적었으면 거기에 맞는 사람을 고릅니다.
+- why에는 이 사람을 추천하는 까닭을 한 줄(40자 안쪽)로 적습니다."""
+SUGGEST_MAX = 8
+
+
+def suggest_prompt(query: str, library: list[dict]) -> str:
+    lines = [f"사용자가 찾는 사람:\n{query.strip()}", "",
+             f"아래 후보 가운데 맞는 사람을 많아야 {SUGGEST_MAX}명 추천하세요.", "", "후보 목록"]
+    for p in library:
+        lines.append(f"- {'★ ' if p.get('fav') else ''}[{p['id']}] {p['name']} / {p.get('title', '')} / 전문: {p.get('expertise', '')} / "
+                     f"성격: {p.get('personality', '')}")
+    lines += ["", "★는 사용자가 즐겨 찾는 인물입니다. 똑같이 잘 맞으면 ★를 앞에 둡니다.", "", "항목 설명",
+              "- id: 추천하는 인물의 id (후보 목록의 대괄호 안 값 그대로)", "- why: 추천하는 까닭 한 줄"]
+    return "\n".join(lines)
+
+
+def suggest_schema() -> dict:
+    text = {"type": "string"}
+    return {
+        "type": "object",
+        "properties": {"picks": {"type": "array", "items": {
+            "type": "object", "properties": {"id": text, "why": text},
+            "required": ["id", "why"], "additionalProperties": False}}},
+        "required": ["picks"], "additionalProperties": False,
+    }
+
+
+def clean_suggestions(picks: list, library: list[dict]) -> list[dict]:
+    """모델이 추천한 것 가운데 보관함에 있는 인물만, 겹치지 않게, 많아야 SUGGEST_MAX명 남긴다."""
+    known = {p["id"] for p in library if p.get("id")}
+    out: list[dict] = []
+    for pick in picks or []:
+        if not isinstance(pick, dict):
+            continue
+        pid = str(pick.get("id", "")).strip().strip("[]")
+        if pid in known and all(o["id"] != pid for o in out):
+            out.append({"id": pid, "why": str(pick.get("why") or "").strip()[:80]})
+        if len(out) >= SUGGEST_MAX:
+            break
+    return out
+
+
 REFRESH_SYSTEM = """당신은 토론 프로그램의 캐스팅 담당입니다. 참가자는 이미 정해져 있습니다. 주제가 바뀌었으므로, 사람은 그대로 두고 각자의 이 주제에서의 입장만 새로 씁니다.
 
 - 목록의 참가자를 한 명도 빼거나 바꾸지 않고 모두 적습니다. id는 목록에 적힌 그대로 옮겨 적습니다.

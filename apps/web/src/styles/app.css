@@ -641,6 +641,24 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .page-head .row { margin-left: auto; }
 .toolbar { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; }
 .toolbar .input { max-width: 20rem; }
+/* 인물 검색창: 안쪽 왼편에 AI 추천 버튼. 켜면 금색으로 채워지고 검색창의 테두리도 금색이 된다 */
+.ai-search { position: relative; display: flex; align-items: center; min-width: 0; }
+.ai-search .input { width: 100%; padding-left: 2.625rem; }
+.toolbar .ai-search { flex: 0 1 26rem; }
+.toolbar .ai-search .input { max-width: none; }
+.menu .ai-search .ai-toggle, .ai-toggle {
+  position: absolute; left: .3125rem; top: 50%; z-index: 1; display: grid; place-items: center; width: 2rem; height: 2rem; padding: 0; margin-top: -1rem;
+  border: 1px solid transparent; border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer;
+  transition: color .15s var(--ease), background .15s var(--ease), border-color .15s var(--ease);
+}
+.menu .ai-search .ai-toggle:hover, .ai-toggle:hover { color: var(--gold-hi); border-color: var(--line-hi); background: transparent; }
+.menu .ai-search .ai-toggle.is-on, .ai-toggle.is-on { color: #17120B; border-color: var(--gold); background: var(--gold); }
+.ai-toggle:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.ai-search.is-ai .input { border-color: var(--gold-lo); }
+/* AI가 이 인물을 추천한 까닭 */
+.ai-why { display: flex; align-items: flex-start; gap: .375rem; color: var(--gold); font-size: .875rem; line-height: 1.5; }
+.ai-why .ico { flex: none; margin-top: .1875rem; }
+.pick-row.is-pick .muted { color: var(--gold); }
 .empty { padding: 4rem 1rem; text-align: center; color: var(--muted); border: 1px dashed var(--line-hi); border-radius: var(--r); }
 .empty h3 { color: var(--gold-hi); font-size: 1.25rem; margin-bottom: .5rem; }
 .drawer-back { position: fixed; inset: 0; z-index: 50; background: var(--scrim); animation: fade .2s var(--ease); }
