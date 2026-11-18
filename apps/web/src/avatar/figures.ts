@@ -582,6 +582,22 @@ export const FIGURES: Figure[] = [
     hair: p('M26 45 Q22 17 50 17 Q78 17 74 45 Q72 32 64 28 Q48 23 35 30 Q28 35 26 45Z', '#C4C4C8')
       + l('M35 29 Q49 20 67 26', '#96969C', 0.9),
     over: glassesThin('#4A4A50') },
+
+  // 이마로 비스듬히 내려온 앞머리, 코 밑의 짧고 네모난 콧수염, 갈색 제복과 검은 넥타이
+  { name: '아돌프 히틀러', skin: '#EFCDB4', face: 'oval', brow: '#2A211C', browH: 3.4,
+    clothes: shoulders('#7A5F3C'), front: shirt + tie('#17171A') + lapels,
+    marks: NOSE.long + UNDER_EYES + l('M38 62 Q36 68 39 73', SH, 1, 0.8) + l('M62 62 Q64 68 61 73', SH, 1, 0.8),
+    hair: p('M26 45 Q23 17 50 17 Q77 17 74 45 Q72 31 64 27 L60 26 Q50 34 34 40 Q28 40 26 45Z', '#2A211C')
+      + l('M60 26 Q48 22 36 26', '#4A3C34', 0.9),
+    over: p('M45.5 59 L54.5 59 L55 64.5 L45 64.5Z', '#2A211C', 0.7) },
+
+  // 벗어진 넓은 이마, 적갈색 콧수염과 뾰족한 턱수염, 조끼를 받쳐 입은 짙은 정장
+  { name: '블라디미르 레닌', skin: '#EDC7A6', face: 'oval', brow: '#7A4A2E', browH: 3.2,
+    clothes: shoulders('#2A2C33'), front: shirt + p('M43 84 L50 92 L57 84 L57 100 L43 100Z', '#3A3D46', 0.9) + tie('#7A1F1F') + lapels,
+    marks: NOSE.soft + SMILE_LINES + soft('M36 24 Q44 20 52 22 Q44 23.5 36 27Z', '#FFFFFF', 0.35)
+      + l('M38 32 Q50 29.5 62 32', SH, 0.9, 0.7),
+    hair: both((f) => p(`M${f(26.5)} 50 Q${f(23.5)} 37 ${f(30)} 31 L${f(31.5)} 43Z`, '#7A4A2E', 0.9)),
+    beard: p('M41 73 Q50 77 59 73 L54 88 Q50 92 46 88Z', '#7A4A2E', 0.8) + mustache('#7A4A2E') },
 ];
 
 /** 둥근 틀 안에 들어가는 그림(눈썹·눈·입 아래). */
