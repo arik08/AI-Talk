@@ -87,6 +87,12 @@ class Turn:
 
 
 HANGUL = re.compile(r"[가-힣]")
+# 한국어로 적은 계획 메모의 표시: "…의 마지막 발언이므로 검색 없이 바로 작성합니다. 2~4문장, 짧고 단호한 말투로…"
+KO_NOTE = re.compile(r"발언이므로|작성합니다|작성하겠습니다|"
+                     r"\d\s*[~\-]\s*\d\s*문장|말투로[,.]|검색 없이|검색하지 않고|지시에 따라|반복하지 않습니다|되풀이하지 않습니다|"
+                     r"길이\s*[:：]")
+SENTENCE_END = re.compile(r"[.!?…。]")
+LEAD_HOLD = 60   # 첫 문장이 이만큼 길어지도록 끝나지 않으면 발언으로 보고 내보낸다
 
 
 class LeadFilter:
@@ -94,7 +100,9 @@ class LeadFilter:
 
     생각 칸을 쓰지 않는 모델은 한국어 발언 앞에 "Opening statement, 2-4 sentences, Korean…" 같은 영어 메모를
     글로 적을 때가 있다. 한글이 한 글자도 없는 앞쪽 줄은 발언이 아니라고 보고 내보내지 않는다.
-    한글이 나오는 줄부터는 받는 대로 흘려보낸다. 끝까지 한글이 없으면 그 글이 곧 발언이므로 통째로 내보낸다.
+    메모를 한국어로 적을 때도 있다("…의 마지막 발언이므로 검색 없이 바로 작성합니다. 2~4문장…"). 발언을 어떻게 쓸지를
+    말하는 줄(KO_NOTE)은 그 줄이 끝날 때까지 붙들었다가 버린다. 그래서 첫 문장이 끝나기 전에는 내보내지 않는다.
+    발언이 시작되면 그 뒤로는 받는 대로 흘려보낸다. 끝까지 발언이 나오지 않으면 걸러 낸 글이 곧 발언이므로 통째로 내보낸다.
     """
 
     def __init__(self) -> None:
@@ -108,12 +116,13 @@ class LeadFilter:
         self.buf += piece
         while True:
             line, sep, rest = self.buf.partition("\n")
-            if HANGUL.search(line):
-                self.open = True
+            note = not HANGUL.search(line) or KO_NOTE.search(line)
+            if not note and (sep or len(line) >= LEAD_HOLD or SENTENCE_END.search(line)):
+                self.open = True   # 첫 문장까지 보았는데 메모가 아니다: 발언이 시작됐다
                 out, self.buf = self.buf, ""
                 return out
             if not sep:
-                return ""
+                return ""          # 줄이 끝나거나 첫 문장이 끝날 때까지 붙든다
             if line.strip():
                 self.dropped += line + "\n"
             self.buf = rest
