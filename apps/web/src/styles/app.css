@@ -333,6 +333,10 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .pick-menu .pick-auto .ico { color: var(--gold); flex: none; }
 .pick-menu .pick-count { padding: .5rem .875rem .125rem; }
 .pick-list { max-height: 20rem; overflow: auto; padding: .375rem; }
+.pick-menu .pick-search { padding: .375rem .875rem .25rem; }
+.pick-menu .pick-search .input { width: 100%; }
+.pick-menu .pick-none { padding: .25rem .875rem .875rem; }
+.pick-list button[hidden] { display: none; }
 .pick-list .pick-check { flex: none; color: var(--muted); }
 .pick-list button.is-on .pick-check { color: var(--gold); }
 .menu button:disabled { opacity: .45; cursor: not-allowed; }

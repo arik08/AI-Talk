@@ -402,6 +402,20 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     for (const id of chosen) if (!people.some((p) => p.id === id)) chosen.delete(id);
     const box = h('div', { class: 'menu pick-menu' });
     menu = box;
+    // 검색창은 한 번만 만들고, 글자를 칠 때는 목록을 다시 그리지 않고 안 맞는 줄만 숨긴다 (줄의 순서가 people과 같게 유지된다)
+    const search = h('input', { class: 'input', type: 'search', placeholder: '이름, 직함, 분야로 찾기', 'aria-label': '인물 찾기',
+      oninput: () => sift(box.querySelector('.pick-list') as HTMLElement) });
+    const none = h('div', { class: 'pick-none muted' }, '찾는 인물이 없습니다');
+    const sift = (list: HTMLElement) => {
+      const q = search.value.trim().toLowerCase();
+      let shown = 0;
+      people.forEach((p, i) => {
+        const hit = !q || [p.name, p.title, p.expertise, ...(p.tags ?? [])].join(' ').toLowerCase().includes(q);
+        (list.children[i] as HTMLElement).hidden = !hit;
+        if (hit) shown++;
+      });
+      none.hidden = shown > 0 || !people.length;
+    };
     const paint = () => {
       const room = Math.min(draft.count, people.length);
       while (chosen.size > room) chosen.delete([...chosen].pop()!);   // 정원을 줄였으면 나중에 고른 사람부터 뺀다
@@ -431,8 +445,10 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
           } }, icon(on ? SquareCheck : Square, 18, 'pick-check'), av,
           h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))));
       }
+      sift(list);
       box.replaceChildren(auto,
-        h('div', { class: 'pick-count muted' }, `직접 고르기 ${chosen.size} / ${room}명`), list);
+        h('div', { class: 'pick-count muted' }, `직접 고르기 ${chosen.size} / ${room}명`),
+        h('div', { class: 'pick-search' }, search), list, none);
     };
     paint();
     pickWrap.append(box);
