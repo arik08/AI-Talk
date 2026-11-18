@@ -66,13 +66,13 @@ def test_presets_are_the_famous_people_set():
     for name in ("일론 머스크", "스티브 잡스", "워런 버핏", "소크라테스", "니콜로 마키아벨리", "장 자크 루소", "박태준",
                  "박정희", "이순신", "세종대왕", "마하트마 간디", "샘 올트먼", "도널드 트럼프",
                  "프리드리히 니체", "이마누엘 칸트", "노자", "나폴레옹", "블라디미르 푸틴", "시진핑", "아이작 뉴턴", "정주영", "이건희", "데미스 하사비스", "다리오 아모데이",
-                 "제프 베이조스", "마크 저커버그", "젠슨 황"):
+                 "제프 베이조스", "마크 저커버그", "젠슨 황", "찰리 멍거", "조지 소로스", "레이 달리오", "캐시 우드", "마이클 버리"):
         assert name in names, name
-    assert len(names) == len(set(names)) == 27
+    assert len(names) == len(set(names)) == 32
     for p in people:
         assert p["id"].startswith("preset_") and p["title"] and p["personality"] and p["speech"] and len(p["claims"]) >= 2
         assert p["hidden"] == ""          # 실존 인물에게 숨은 속내를 지어 붙이지 않는다
-    assert sorted(p["avatar"]["variant"] for p in people) == list(range(27))   # 인물마다 자기 얼굴 아바타 하나
+    assert sorted(p["avatar"]["variant"] for p in people) == list(range(32))   # 인물마다 자기 얼굴 아바타 하나
     assert all(p["avatar"]["set"] == "figure" for p in people)
 
 
@@ -85,7 +85,7 @@ def test_old_preset_set_is_replaced_once_and_own_personas_are_kept(tmp_path, mon
     monkeypatch.setattr(store, "_ready_for", None)    # 서버를 다시 켠다
     names = [p["name"] for p in store.list_personas()]
     assert "강도현" not in names and "일론 머스크" in names and "내가 만든 인물" in names
-    assert len(names) == 28
+    assert len(names) == 33   # 기본 인물 32명 + 내가 만든 인물
     store.delete_persona("preset_musk")
     monkeypatch.setattr(store, "_ready_for", None)
     assert "일론 머스크" not in [p["name"] for p in store.list_personas()]   # 지운 기본 인물은 되살아나지 않는다

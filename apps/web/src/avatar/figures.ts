@@ -266,6 +266,44 @@ export const FIGURES: Figure[] = [
     hair: p('M25 45 Q20 15 52 15 Q82 16 75 45 Q73 30 60 27 Q44 24 33 30 Q27 34 25 45Z', '#C9C9CC')
       + l('M30 29 Q50 18 72 27', '#9A9AA0', 1) + l('M34 25 Q52 16 68 22', '#9A9AA0', 0.9),
     over: glassesThin('#5A5A60') },
+
+  // 숱이 적은 흰 머리, 크고 두꺼운 검은 뿔테 안경, 깊은 주름, 짙은 회색 정장
+  { name: '찰리 멍거', skin: '#F0CDB8', face: 'long', brow: '#CFCFCF', ...suit('#2E3138', '#3D4F7A'),
+    marks: NOSE.big + FOREHEAD + SMILE_LINES + UNDER_EYES,
+    hair: soft('M31 30 Q50 15 69 30 Q50 23.5 31 30Z', '#EDEDED', 0.75)
+      + both((f) => p(`M${f(28)} 47 Q${f(25.5)} 32 ${f(33)} 25 L${f(33.5)} 39Z`, '#EDEDED', 0.9)),
+    over: glassesSquare('#1E1E20', 2.6) },
+
+  // 물결치는 흰 머리, 눈 밑의 처진 살, 둥근 얼굴, 가는 테 안경, 남색 정장
+  { name: '조지 소로스', skin: '#EDC4A6', face: 'jowly', brow: '#BEBEC2', ...suit('#232B3F', '#7A2E3A'),
+    marks: NOSE.big + FOREHEAD + SMILE_LINES + UNDER_EYES + l('M34 59.5 Q39.5 62.5 45 59.5', SH, 0.9, 0.6) + l('M55 59.5 Q60.5 62.5 66 59.5', SH, 0.9, 0.6),
+    hair: p('M23 46 Q19 26 28 24 Q30 15 41 19 Q47 12 56 18 Q66 13 71 23 Q81 25 77 46 Q74 33 63 30 Q50 26 37 30 Q27 34 23 46Z', '#E4E4E8')
+      + l('M32 26 Q40 21 47 24', '#B4B4BA', 0.9) + l('M53 23 Q61 20 68 26', '#B4B4BA', 0.9),
+    over: glassesThin('#6A6A70') },
+
+  // 옆으로 넘긴 회색 머리, 갸름한 얼굴, 넥타이 없이 푸른 셔츠와 짙은 재킷
+  { name: '레이 달리오', skin: '#EBC3A2', face: 'long', brow: '#7C7C80',
+    clothes: shoulders('#262B36'), front: p('M42 81 L47 92 L50 88 L53 92 L58 81 L55 78.5 L45 78.5Z', '#A9C4E4') + lapels,
+    marks: NOSE.long + FOREHEAD + SMILE_LINES,
+    hair: p('M27 45 Q23 17 50 16.5 Q77 17 73 45 Q71 31 62 27 Q48 22 36 29 Q29 34 27 45Z', '#A6A6AA')
+      + l('M36 28 Q50 19 68 27', '#7C7C80', 1) + l('M34 32 Q39 26 46 24', '#7C7C80', 0.9) },
+
+  // 어깨까지 오는 금발, 짙은 뿔테 안경, 짙은 재킷에 가는 십자가 목걸이
+  { name: '캐시 우드', skin: '#F3D2BA', face: 'oval', brow: '#A8854F', browH: 2.4,
+    clothes: shoulders('#2B2540'), back: p('M21 46 Q17 72 25 90 L75 90 Q83 72 79 46Z', '#D9B45E'),
+    front: p('M41 81 Q50 91 59 81 L57 78.5 L43 78.5Z', '#F1E9DC') + lapels
+      + l('M44.5 81.5 Q50 88 55.5 81.5', GOLD, 0.8) + l('M50 87 L50 91.5', GOLD, 1) + l('M48.4 88.6 L51.6 88.6', GOLD, 1),
+    marks: NOSE.soft + SMILE_LINES,
+    hair: p('M22 60 Q17 17 50 16 Q83 17 78 60 Q75 38 66 29 Q52 22 38 28 Q26 36 22 60Z', '#E3C06A')
+      + l('M40 27 Q50 20 63 27', '#B8923F', 1) + l('M27 40 Q31 31 38 28', '#B8923F', 0.9),
+    over: glassesSquare('#3A2A22', 1.8) },
+
+  // 짧게 깎은 갈색 머리, 수염 자국, 각진 턱, 정장 없이 짙은 티셔츠
+  { name: '마이클 버리', skin: '#EEC6A6', face: 'square', brow: '#5A4030',
+    clothes: shoulders('#2F3B36'), front: p('M40 82 Q50 91 60 82 L58 79 L42 79Z', '#3B4A44'),
+    marks: NOSE.soft + UNDER_EYES + l('M38 33 Q50 30.5 62 33', SH, 0.9, 0.7),
+    hair: p('M27 43 Q25 18 50 17.5 Q75 18 73 43 Q70 30 60 27.5 Q50 25 40 27.5 Q30 30 27 43Z', '#5A4030'),
+    beard: soft('M28 58 Q29 78 50 84.5 Q71 78 72 58 Q67 73 50 75 Q33 73 28 58Z', '#5A4030', 0.22) },
 ];
 
 /** 둥근 틀 안에 들어가는 그림(눈썹·눈·입 아래). */
