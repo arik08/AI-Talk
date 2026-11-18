@@ -460,15 +460,29 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     menu = h('div', { class: 'menu' });
     const items = library.filter((p) => !used.has(p.id));
     if (!items.length) menu.append(h('div', { class: 'muted small', style: 'padding:.5rem .625rem' }, '고를 인물이 없습니다. 페르소나 메뉴에서 만들 수 있습니다.'));
+    const rows: HTMLElement[] = [];
+    const none = h('div', { class: 'muted small', style: 'padding:.5rem .625rem', hidden: true }, '찾는 인물이 없습니다');
+    const search = h('input', { class: 'input', type: 'search', placeholder: '이름, 직함, 분야로 찾기', 'aria-label': '인물 찾기', oninput: () => {
+      const q = search.value.trim().toLowerCase();
+      let shown = 0;
+      items.forEach((p, i) => {
+        const hit = !q || [p.name, p.title, p.expertise, ...(p.tags ?? [])].join(' ').toLowerCase().includes(q);
+        rows[i].hidden = !hit;
+        if (hit) shown++;
+      });
+      none.hidden = shown > 0;
+    } });
+    if (items.length) menu.append(h('div', { class: 'menu-search' }, search));
     for (const p of items) {
       const av = createAvatar(p.avatar, p.color, 32);
       av.classList.add('is-still');
-      menu.append(h('button', { type: 'button', onclick: () => {
+      rows.push(h('button', { type: 'button', onclick: () => {
         draft.cast[index] = { ...dress(p, index), fromLibrary: true };
         closeMenu();
         paintCast();
       } }, av, h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))));
     }
+    menu.append(...rows, none);
     const card = anchor.closest('.pcard') as HTMLElement;
     card.append(menu);
     menu.style.left = '1rem';
