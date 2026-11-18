@@ -858,11 +858,12 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     }
   }
 
-  async function judge(): Promise<void> {
+  /** 판정을 받는다. 토론이 끝나면 저절로 부른다(auto). 그때는 화면을 판정 쪽으로 끌어가지 않는다. */
+  async function judge(auto = false): Promise<void> {
     if (judging || !record) return;
     judging = true;
     paintControls();
-    showVerdict({}, { partial: true, scroll: true });
+    showVerdict({}, { partial: true, scroll: !auto });
     try {
       const res = await api.verdict(id, (part) => showVerdict(part, { partial: true }));
       record.verdict = res.verdict;
@@ -1012,6 +1013,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         paintBadges();
         paintControls();
         if (!instant) { showQa(); showCost(); follow(); }
+        // 판정은 토론이 끝나면 바로 낸다. 중단된 토론과 발언이 거의 없는 토론은 건너뛴다
+        if (!instant && ev.state !== 'aborted' && record && !record.verdict && cards.size >= 2) void judge(true);
         break;
       default: break;
     }
@@ -1045,11 +1048,13 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       put(controls,
         canResume ? h('button', { type: 'button', class: 'btn btn--primary', disabled: resuming, tip: '끊긴 곳 다음 발언부터 토론을 이어 갑니다', onclick: () => resumeDebate() },
           icon(resuming ? LoaderCircle : StepForward, 18, resuming ? 'spin' : ''), resuming ? '이어 가는 중' : '이어 하기') : null,
-        h('button', { type: 'button', class: `btn${canResume ? '' : ' btn--primary'}`, disabled: writingMinutes, onclick: () => writeMinutes() },
-          icon(writingMinutes ? LoaderCircle : FileText, 18, writingMinutes ? 'spin' : ''),
-          writingMinutes ? '회의록을 쓰는 중' : record?.minutes ? '회의록 다시 쓰기' : '회의록 쓰기'),
-        h('button', { type: 'button', class: 'btn', disabled: judging, tip: '누가 더 설득력 있게 토론했는지 AI 심사위원의 평가를 받습니다', onclick: () => judge() },
-          icon(judging ? LoaderCircle : Scale, 18, judging ? 'spin' : ''), judging ? '판정하는 중' : record?.verdict ? '다시 판정' : '판정'),
+        // 회의록과 판정은 토론이 끝나면 저절로 나온다. 다시 쓰는 버튼은 두지 않고, 없을 때(예전 토론, 쓰다 실패한 경우)만 받는 버튼을 보인다
+        record?.minutes && !writingMinutes ? null
+          : h('button', { type: 'button', class: `btn${canResume ? '' : ' btn--primary'}`, disabled: writingMinutes, onclick: () => writeMinutes() },
+            icon(writingMinutes ? LoaderCircle : FileText, 18, writingMinutes ? 'spin' : ''), writingMinutes ? '회의록을 쓰는 중' : '회의록 쓰기'),
+        record?.verdict && !judging ? null
+          : h('button', { type: 'button', class: 'btn', disabled: judging, tip: '누가 더 설득력 있게 토론했는지 AI 심사위원의 평가를 받습니다', onclick: () => judge() },
+            icon(judging ? LoaderCircle : Scale, 18, judging ? 'spin' : ''), judging ? '판정하는 중' : '판정'),
         h('button', { type: 'button', class: 'btn', tip: '다른 프로그램에 붙여 넣을 수 있게 마크다운으로 복사합니다', onclick: () => copyAll() },
           icon(Copy, 18), '대화 + 회의록 복사'),
         h('div', { class: 'sep' }),
