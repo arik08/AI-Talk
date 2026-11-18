@@ -90,7 +90,9 @@ def shared_context(cfg: dict, briefing: str) -> str:
     if concept:
         parts += ["# 이 토론의 설정과 분위기",
                   "아래는 이 자리가 어떤 자리인지에 대한 설정입니다. 참가자 모두에게 똑같이 적용됩니다. "
-                  "말투, 격식, 분위기, 서로를 대하는 태도를 여기에 맞추세요. 인물 각자의 성격은 그 안에서 드러냅니다.",
+                  "말투, 격식, 분위기, 서로를 대하는 태도를 여기에 맞추세요. 인물 각자의 성격은 그 안에서 드러냅니다. "
+                  "설정 말고도 주제에 다 적지 못한 배경 정보나 토론에 바라는 점이 함께 적혀 있을 수 있습니다. "
+                  "배경 정보는 주제의 일부로 알고 토론하고, 바라는 점은 토론 내내 따르세요.",
                   concept, ""]
     tone = TONES.get(cfg.get("tone") or "default")
     if tone:
@@ -227,7 +229,7 @@ def cast_prompt(topic: str, count: int, policy: str, fixed: list[dict], material
                 concept: str = "", tone: str = "default") -> str:
     lines = [f"토론 주제:\n{topic.strip()}", ""]
     if concept.strip():
-        lines += ["이 토론의 설정과 분위기 (이 자리에 어울리는 사람들로 구성하세요):", concept.strip(), ""]
+        lines += ["이 토론의 설정과 분위기 (이 자리에 어울리는 사람들로 구성하세요. 주제의 배경 정보나 따로 바라는 점이 적혀 있으면 그것도 반영하세요):", concept.strip(), ""]
     if tone in TONE_LABEL:
         lines += [f"토론의 분위기: {TONE_LABEL[tone]}. 이 분위기에서 잘 살아날 인물들로 구성하세요.", ""]
     lines += [f"참가자 {count}명을 만드세요.",
@@ -276,7 +278,7 @@ def pick_prompt(topic: str, count: int, policy: str, library: list[dict], materi
                 concept: str = "", tone: str = "default") -> str:
     lines = [f"토론 주제:\n{topic.strip()}", ""]
     if concept.strip():
-        lines += ["이 토론의 설정과 분위기 (이 자리에 어울리는 사람들로 고르세요):", concept.strip(), ""]
+        lines += ["이 토론의 설정과 분위기 (이 자리에 어울리는 사람들로 고르세요. 주제의 배경 정보나 따로 바라는 점이 적혀 있으면 그것도 반영하세요):", concept.strip(), ""]
     if tone in TONE_LABEL:
         lines += [f"토론의 분위기: {TONE_LABEL[tone]}. 이 분위기에서 잘 살아날 인물들로 고르세요.", ""]
     lines += [f"아래 후보 가운데 참가자 {count}명을 고르세요.",

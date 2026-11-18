@@ -137,7 +137,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       h('div', { class: 'topic-foot' }, h('span', { class: 'muted small' }, '예시'),
         EXAMPLES.map((text) => h('button', { type: 'button', class: 'chip', onclick: () => { topic.value = text; draft.topic = text; paintStart(); topic.focus(); } }, text)))),
     h('div', { class: 'panel concept-box' },
-      h('div', { class: 'concept-label' }, icon(Drama, 18), '컨셉과 분위기', h('small', null, '선택. 어떤 자리인지, 어떤 분위기인지. 참가자 모두에게 똑같이 적용됩니다')),
+      h('div', { class: 'concept-label' }, icon(Drama, 18), '컨셉과 분위기', h('small', null, '선택. 어떤 자리인지, 어떤 분위기인지. 주제에 못 적은 배경이나 바라는 점도 좋습니다. 참가자 모두에게 똑같이 적용됩니다')),
       concept,
       h('div', { class: 'topic-foot' }, h('span', { class: 'muted small' }, '예시'),
         CONCEPTS.map((text) => h('button', { type: 'button', class: 'chip', onclick: () => { concept.value = text; draft.concept = text; concept.focus(); } }, text)))),
