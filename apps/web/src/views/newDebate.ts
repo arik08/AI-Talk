@@ -264,6 +264,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   let picking = false;   // 보관함에서 고르는 중인지 (자동 생성과 구분해 버튼에 보여 준다)
   const chosen = new Set<string>();   // 보관함 목록에서 직접 체크한 인물. 남은 자리만 AI가 고른다
   const castGrid = h('div', { class: 'cast-grid' });
+  const swapAvatar = new Map<number, () => void>();   // 카드를 다시 그리지 않고 그 자리의 아바타만 바꾸는 함수
   const bulkBar = h('div', { class: 'panel bulk-bar hidden' });
   const countNote = h('span', { class: 'muted small' });
   page.append(h('section', { class: 'block' },
@@ -294,8 +295,11 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
 
   function reassignAvatars(): void {
     const picks = pickAvatars(draft.count, draft.avatarSet);
-    draft.cast.forEach((p, i) => { if (p && !p.fromLibrary) p.avatar = picks[i]; });
-    paintCast();
+    draft.cast.forEach((p, i) => {
+      if (!p || p.fromLibrary) return;
+      p.avatar = picks[i];
+      swapAvatar.get(i)?.();   // 카드는 그대로 두고 아바타만 바꾼다
+    });
   }
 
   async function generateAll(): Promise<boolean> {
@@ -528,6 +532,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     pickBtn.append(icon(picking ? LoaderCircle : Library, 18, picking ? 'spin' : ''), picking ? '고르는 중' : '보관함에서 구성');
     paintBulk();
     clear(castGrid);
+    swapAvatar.clear();
     while (draft.cast.length < draft.count) draft.cast.push(null);
     draft.cast.forEach((p, i) => {
       const libBtn = h('button', { type: 'button', class: 'btn btn--icon lib-btn', tip: '보관함에서 고르기', 'aria-label': '보관함에서 고르기',
@@ -539,9 +544,15 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
             h('button', { type: 'button', class: 'btn', onclick: () => regenerate(i) }, icon(Sparkles, 18), '만들기'), libBtn)));
         return;
       }
-      const av = createAvatar(p.avatar, p.color, 72);
+      let av = createAvatar(p.avatar, p.color, 72);
       setAvatar(av, { state: 'listening' });
       let moodIndex = 0;
+      swapAvatar.set(i, () => {
+        av = createAvatar(p.avatar, p.color, 72);
+        setAvatar(av, { state: 'listening' });
+        moodIndex = 0;
+        avBtn.replaceChildren(av);
+      });
       const avBtn = h('button', { type: 'button', class: 'avatar-btn', tip: '눌러서 감정 움직임 미리 보기', 'aria-label': '감정 움직임 미리 보기',
         onclick: () => { setAvatar(av, { mood: MOOD_CYCLE[moodIndex % MOOD_CYCLE.length], state: moodIndex % 2 ? 'speaking' : 'listening' }); moodIndex += 1; } }, av);
       castGrid.append(h('div', { class: `pcard${loading.has(i) ? ' is-loading' : ''}`, style: `--c:${p.color};animation-delay:${i * 60}ms` },
@@ -559,7 +570,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
             const set = AVATAR_SETS.find((s) => s.id === p.avatar.set)!;
             const next = p.avatar.variant + 1;
             p.avatar = { set: p.avatar.set, variant: next >= set.count ? set.first : next };
-            paintCast();
+            swapAvatar.get(i)?.();
+            persist();
           } }, icon(Shuffle, 18)),
           h('button', { type: 'button', class: 'btn btn--icon', tip: '이 사람만 다시 만들기', 'aria-label': '이 사람만 다시 만들기', onclick: () => regenerate(i) }, icon(RefreshCw, 18)),
           libBtn,
