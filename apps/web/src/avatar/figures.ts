@@ -439,6 +439,87 @@ export const FIGURES: Figure[] = [
       + l('M29 24 Q40 12 54 13', '#3C3C40', 1) + l('M46 12 Q60 10 71 22', '#3C3C40', 1),
     over: `<g fill="#6B5A3A" fill-opacity=".32" stroke="#33312E" stroke-width="1.6"><rect x="28.5" y="43" width="20" height="16" rx="5"/><rect x="51.5" y="43" width="20" height="16" rx="5"/></g>`
       + l('M48.5 48.5 L51.5 48.5', '#33312E', 1.6) + l('M28.5 49 L25 47.5', '#33312E', 1.4) + l('M71.5 49 L75 47.5', '#33312E', 1.4) },
+
+  // 앞머리를 내린 짧은 검은 머리, 갸름한 얼굴, 넥타이 없는 정장, 옷깃 아래 흑백 바둑돌
+  { name: '이세돌', skin: '#EBC39E', face: 'long', brow: '#17171A',
+    clothes: shoulders('#262A36'), front: p('M42 81 L47 92 L50 88 L53 92 L58 81 L55 78.5 L45 78.5Z', WHITE) + lapels
+      + c(33, 94, 3.2, '#111114', 0.8) + c(67, 94, 3.2, WHITE, 0.8),
+    marks: NOSE.soft,
+    hair: p('M27 46 Q22 16 50 16 Q78 16 73 46 Q72 34 66 31 Q58 34 50 31 Q42 35 34 31 Q29 35 27 46Z', '#17171A') },
+
+  // 둥글고 넉넉한 얼굴, 짧은 검은 머리, 웃음 주름, 단추가 두 줄인 흰 조리복
+  { name: '백종원', skin: '#E8BD96', face: 'round', brow: '#1E1E20',
+    clothes: shoulders(WHITE) + l('M50 88 L50 102', '#C9C4B8', 1)
+      + [[45, 92], [45, 98], [55, 92], [55, 98]].map(([x, y]) => c(x, y, 1.3, '#3A3A40', 0)).join(''),
+    front: p('M41 81 Q50 86 59 81 L60 85 Q50 90 40 85Z', WHITE),
+    marks: NOSE.big + SMILE_LINES,
+    hair: p('M24 45 Q21 18 50 18 Q79 18 76 45 Q73 32 64 28 Q50 24 36 28 Q27 32 24 45Z', '#1E1E20') },
+
+  // 크게 부풀린 갈색 웨이브 머리, 붉은 재킷과 흰 블라우스
+  { name: '오은영', skin: '#F3D3BC', face: 'oval', brow: '#6B4530', browH: 2.4,
+    clothes: shoulders('#B5304A'),
+    back: p('M14 50 Q6 14 50 9 Q94 14 86 50 Q90 72 80 86 L20 86 Q10 72 14 50Z', '#7A4A30')
+      + l('M17 58 q5 5 0 10 q-5 5 0 10', '#5A3420', 1.1) + l('M83 58 q-5 5 0 10 q5 5 0 10', '#5A3420', 1.1),
+    front: p('M41 81 Q50 91 59 81 L57 78.5 L43 78.5Z', '#F6EFE6') + lapels,
+    marks: NOSE.soft,
+    hair: p('M21 56 Q12 12 50 11 Q88 12 79 56 Q77 38 68 30 Q56 22 44 26 Q28 32 21 56Z', '#7A4A30')
+      + l('M30 34 Q40 21 56 22', '#5A3420', 1) + l('M60 23 Q70 27 74 38', '#5A3420', 1) },
+
+  // 짧게 깎은 머리, 짧은 콧수염과 턱수염, 둥근 얼굴, 야외용 녹색 점퍼
+  { name: '강형욱', skin: '#E6BA94', face: 'round', brow: '#1E1C1A',
+    clothes: shoulders('#3F5A46'),
+    front: p('M42 81 L50 90 L58 81 L63 84.5 L54 96 L50 91.5 L46 96 L37 84.5Z', '#35503D') + l('M50 91.5 L50 102', '#22382A', 1.3),
+    marks: NOSE.soft + SMILE_LINES,
+    hair: p('M26 43 Q24 19 50 18.5 Q76 19 74 43 Q71 31 61 28 Q50 25.5 39 28 Q29 31 26 43Z', '#1E1C1A'),
+    beard: soft('M29 60 Q30 79 50 85 Q70 79 71 60 Q66 73 50 75.5 Q34 73 29 60Z', '#1E1C1A', 0.5)
+      + mustache('#1E1C1A') },
+
+  // 옆으로 넘긴 회색 머리, 가는 테 안경, 셔츠 깃이 보이는 푸른 스웨터
+  { name: '빌 게이츠', skin: '#F2D0B8', face: 'oval', brow: '#9A948C',
+    clothes: shoulders('#3B5A7A'),
+    front: p('M41 81 Q50 91 59 81 L57 78.5 L43 78.5Z', '#3B5A7A')
+      + p('M42 80 L49 86 L45.5 90 L40 83Z', WHITE, 0.8) + p('M58 80 L51 86 L54.5 90 L60 83Z', WHITE, 0.8),
+    marks: NOSE.soft + FOREHEAD + SMILE_LINES,
+    hair: p('M26 45 Q22 17 50 17 Q78 17 74 45 Q72 32 64 28 Q48 23 35 30 Q28 35 26 45Z', '#B4AEA6')
+      + l('M35 29 Q49 20 67 26', '#8C867E', 0.9),
+    over: glassesThin('#4A4A4E') },
+
+  // 삭발한 머리, 갸름한 얼굴, 가는 금속테 안경, 짙은 재킷과 깃 없는 셔츠
+  { name: '유발 하라리', skin: '#EBC4A2', face: 'long', brow: '#3A322C',
+    clothes: shoulders('#22252E'), front: p('M41 81 Q50 89 59 81 L57 78.5 L43 78.5Z', '#4A5568') + lapels,
+    marks: NOSE.long + l('M38 62 Q36 68 39 73', SH, 1, 0.8) + l('M62 62 Q64 68 61 73', SH, 1, 0.8)
+      + soft('M36 24 Q44 20 52 22 Q44 23.5 36 27Z', '#FFFFFF', 0.35)
+      + soft('M29 40 Q28 21 50 20 Q72 21 71 40 Q64 26.5 50 26 Q36 26.5 29 40Z', '#3A322C', 0.22),
+    over: glassesThin('#6A6A70') },
+
+  // 부스스한 흰 머리, 마른 긴 얼굴과 큰 코, 셔츠 위에 입은 회색 스웨터
+  { name: '제프리 힌턴', skin: '#F1D2BC', face: 'long', brow: '#D0D0D0',
+    clothes: shoulders('#5A606B'),
+    front: p('M41 81 Q50 91 59 81 L57 78.5 L43 78.5Z', '#5A606B')
+      + p('M42 80 L49 86 L45.5 90 L40 83Z', '#C9D6EA', 0.8) + p('M58 80 L51 86 L54.5 90 L60 83Z', '#C9D6EA', 0.8),
+    marks: NOSE.big + FOREHEAD + SMILE_LINES + UNDER_EYES,
+    hair: p('M26 46 Q20 20 30 22 Q33 13 44 18 Q52 12 60 18 Q70 14 71 24 Q80 22 74 46 Q72 33 62 29 Q50 25 38 29 Q28 33 26 46Z', '#EEEEEE')
+      + l('M33 26 Q41 20 48 23', '#C2C2C2', 0.9) + l('M54 22 Q62 20 67 26', '#C2C2C2', 0.9) },
+
+  // 양쪽으로 길게 땋아 내린 머리, 앳된 둥근 얼굴, 노란 비옷
+  { name: '그레타 툰베리', skin: '#F4D6C0', face: 'round', brow: '#8A6A48', browH: 2.4,
+    clothes: shoulders('#E8C22E') + l('M50 88 L50 102', '#B8961E', 1.2),
+    back: both((f) => [60, 68, 76, 84, 92].map((y, k) => c(f(k % 2 ? 20.5 : 22), y, 4.6, '#A9825A', 0.9)).join('')),
+    front: p('M41 81 Q50 87 59 81 L61 85.5 Q50 92 39 85.5Z', '#D9B325'),
+    marks: NOSE.snub,
+    hair: p('M23 54 Q19 18 50 18 Q81 18 77 54 Q75 36 62 29 L50 24 L38 29 Q25 36 23 54Z', '#A9825A')
+      + l('M50 18 L50 24', '#7E5E3E', 1) },
+
+  // 숱이 줄어든 회색 머리, 가는 테 안경, 셔츠 위의 알록달록한 멜빵
+  { name: '레이 커즈와일', skin: '#EFCDB6', face: 'oval', brow: '#8A8A8E',
+    clothes: shoulders('#DCE6F2')
+      + both((f) => p(`M${f(36)} 83.5 L${f(41)} 82.5 L${f(38)} 102 L${f(32)} 102Z`, '#C0392B', 0.8)
+        + c(f(37.2), 89, 1.2, '#F2C94C', 0) + c(f(36), 95, 1.2, '#2F80ED', 0)),
+    front: p('M42 81 L47 92 L50 88 L53 92 L58 81 L55 78.5 L45 78.5Z', WHITE),
+    marks: NOSE.soft + FOREHEAD + SMILE_LINES + UNDER_EYES,
+    hair: p('M29 41 Q28 20 50 20 Q72 20 71 41 Q66 28.5 50 28 Q34 28.5 29 41Z', '#A8A8AC')
+      + both((f) => p(`M${f(27)} 49 Q${f(25.5)} 38 ${f(29)} 34 L${f(31)} 46Z`, '#A8A8AC', 0.8)),
+    over: glassesThin('#3E3E44') },
 ];
 
 /** 둥근 틀 안에 들어가는 그림(눈썹·눈·입 아래). */
