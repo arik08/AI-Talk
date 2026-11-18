@@ -18,6 +18,9 @@ from .base import (Context, ModelInfo, OnEvent, Provider, ProviderError, Speech,
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+# 검색 도구가 있을 때 글 블록의 앞머리를 이만큼 붙들어 본다. 그 안에 검색이 시작되면 "찾아보겠습니다" 같은
+# 한마디이므로 버리고, 넘으면 발언으로 보고 받는 대로 흘려보낸다
+HOLD_CHARS = 80
 
 # 100만 토큰당 달러. 설계 문서 7.3의 표와 같다.
 PRICES = {
@@ -190,8 +193,9 @@ class ClaudeProvider(Provider):
                            **params: Any) -> Any:
         tool_json: dict[int, str] = {}
         if hold is None:
-            hold = bool(params.get("tools"))   # 도구가 있으면 글 블록이 끝날 때까지 붙들어 둔다
+            hold = bool(params.get("tools"))   # 도구가 있으면 글 블록의 앞머리를 붙들어 둔다
         held = ""
+        loose = False   # 이 글 블록이 HOLD_CHARS를 넘겨, 붙들지 않고 바로 흘려보내는 중인지
 
         def flush() -> None:
             nonlocal held
@@ -207,14 +211,19 @@ class ClaudeProvider(Provider):
                     btype = getattr(event.content_block, "type", "")
                     if btype == "server_tool_use":
                         tool_json[event.index] = ""
-                        held = ""        # 검색 전에 한 말은 발언이 아니므로 버린다
+                        held = ""        # 검색 전에 한 짧은 말은 발언이 아니므로 버린다
+                        loose = False
                     elif btype == "text":
                         flush()
+                        loose = False
                 elif kind == "content_block_delta":
                     dtype = event.delta.type
                     if dtype == "text_delta":
-                        if hold:
+                        if hold and not loose:
                             held += event.delta.text
+                            if len(held) >= HOLD_CHARS:   # 검색 전의 한마디치고는 길다: 발언이므로 이제부터 흘려보낸다
+                                loose = True
+                                flush()
                         else:
                             speech.text += event.delta.text
                             on_event("text", event.delta.text)
