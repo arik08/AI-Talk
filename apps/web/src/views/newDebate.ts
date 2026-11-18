@@ -23,7 +23,7 @@ const draft = {
   moderator: true,
   mode: 'mixed',
   turnsOn: true, maxTurns: 30,
-  minutesOn: true, maxMinutes: 10,
+  minutesOn: true, maxMinutes: 20,
   length: 'auto',
   speed: 'normal',
   interjection: true,

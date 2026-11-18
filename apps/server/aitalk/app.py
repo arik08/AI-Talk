@@ -290,7 +290,7 @@ class DebateIn(BaseModel):
     moderator: bool = True
     mode: str = "mixed"
     max_turns: Optional[int] = 30
-    max_minutes: Optional[float] = 10
+    max_minutes: Optional[float] = 20
     length: str = "auto"       # auto | short | normal | long
     interjection: bool = True
     speed: str = "normal"
