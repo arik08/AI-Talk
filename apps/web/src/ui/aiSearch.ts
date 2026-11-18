@@ -1,4 +1,4 @@
-import { LoaderCircle, Sparkles } from 'lucide';
+import { Sparkles } from 'lucide';
 import { api } from '../api';
 import type { Persona } from '../types';
 import { clear, h, icon, toast } from './dom';
@@ -28,9 +28,9 @@ export function aiSearch(opts: {
   const root = h('div', { class: 'ai-search' }, btn, input);
 
   const paint = () => {
-    const label = on ? 'AI 추천 끄기' : 'AI 추천: 찾는 사람을 말로 적으면 AI가 골라 줍니다';
+    const label = busy ? 'AI가 고르는 중' : on ? 'AI 추천 끄기' : 'AI 추천: 찾는 사람을 말로 적으면 AI가 골라 줍니다';
     clear(btn);
-    btn.append(icon(busy ? LoaderCircle : Sparkles, 16, busy ? 'spin' : ''));
+    btn.append(busy ? h('span', { class: 'ai-spin', 'aria-hidden': 'true' }) : icon(Sparkles, 16));
     btn.classList.toggle('is-on', on);
     btn.dataset.tip = label;
     btn.setAttribute('aria-label', label);
