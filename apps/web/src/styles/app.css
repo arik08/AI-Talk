@@ -332,6 +332,8 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .pcard-claims li { padding-left: .875rem; position: relative; }
 .pcard-claims li::before { content: ""; position: absolute; left: 0; top: .6em; width: .3rem; height: .3rem; background: var(--c); transform: rotate(45deg); }
 .pcard-meta { display: flex; flex-wrap: wrap; gap: .375rem; }
+/* 한 줄짜리 칩: 글자 수로 자르지 않고 카드의 폭만큼 보여 준 뒤 넘치는 곳에서 말줄임표로 끝낸다 */
+.chip--line { display: block; padding-block: .25rem; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pcard-foot { display: flex; align-items: center; gap: .125rem; margin-top: auto; padding-top: .5rem; border-top: 1px solid var(--line); }
 .pcard-foot .grow { display: flex; gap: .5rem; }
 .pcard--empty { align-items: center; justify-content: center; min-height: 13rem; border-style: dashed; border-top: 1px dashed var(--line-hi); color: var(--dim); background: transparent; gap: .5rem; }
