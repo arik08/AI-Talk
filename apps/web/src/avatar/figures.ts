@@ -1,0 +1,232 @@
+/**
+ * 인물 아바타: 보관함의 유명인을 알아볼 수 있게 그린 색 일러스트.
+ *
+ * 사진이나 생성 이미지를 쓰지 않고 기본 도형과 곡선으로 그린다. 인물마다 얼굴형, 피부색, 머리 모양과 색,
+ * 주름, 수염, 안경, 모자, 복장처럼 널리 알려진 특징을 담는다.
+ * 눈썹·눈·입은 avatar.ts가 얼굴 세트와 같은 자리에 그려 넣어 감정에 따라 움직인다:
+ * 눈썹 y=40.5, 눈 (39.5, 51)·(60.5, 51), 입 (50, 68). 그림은 이 자리에 맞춰 그린다.
+ *
+ * 겹치는 순서: clothes → back → 목 → front → 귀 → 얼굴 → marks → hair → beard → (눈썹·눈·입) → over → top
+ * top만 둥근 틀 밖으로 나갈 수 있다 (모자의 챙, 투구의 꼭지).
+ */
+
+const K = '#2A1C14';            // 윤곽선
+const SH = '#8A5A3C';           // 얼굴의 주름과 코에 쓰는 그늘색
+const WHITE = '#F4F1EA';
+const GOLD = '#D4A63A';
+
+const p = (d: string, fill: string, sw = 1.1): string =>
+  `<path d="${d}" fill="${fill}" stroke="${K}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+const c = (cx: number, cy: number, r: number, fill: string, sw = 1.1): string =>
+  `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" stroke="${K}" stroke-width="${sw}"/>`;
+const l = (d: string, color = SH, sw = 1.1, opacity = 1): string =>
+  `<path d="${d}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" opacity="${opacity}"/>`;
+const soft = (d: string, fill: string, opacity: number): string => `<path d="${d}" fill="${fill}" opacity="${opacity}"/>`;
+/** 좌우 대칭인 조각: x를 100에서 뺀 것을 함께 그린다. */
+const both = (make: (flip: (x: number) => number) => string): string => make((x) => x) + make((x) => 100 - x);
+
+const FACE: Record<string, string> = {
+  oval: 'M26 46 Q26 20 50 20 Q74 20 74 46 Q74 70 62 79 Q50 86 38 79 Q26 70 26 46Z',
+  round: 'M24 48 Q24 20 50 20 Q76 20 76 48 Q76 72 62 80 Q50 85 38 80 Q24 72 24 48Z',
+  long: 'M28 46 Q28 19 50 19 Q72 19 72 46 Q72 68 61 80 Q50 88 39 80 Q28 68 28 46Z',
+  square: 'M26 44 Q26 20 50 20 Q74 20 74 44 L73 66 Q70 80 56 83 L44 83 Q30 80 27 66Z',
+  jowly: 'M25 44 Q25 20 50 20 Q75 20 75 44 Q79 70 66 80 Q50 87 34 80 Q21 70 25 44Z',
+};
+
+const SHOULDERS = 'M12 102 Q14 86 34 83 L42 81 L58 81 L66 83 Q86 86 88 102Z';
+const shoulders = (color: string): string => p(SHOULDERS, color);
+const neck = (skin: string): string => p('M42 70 L42 84 Q50 89 58 84 L58 70Z', skin);
+const ears = (skin: string, r = 5): string => c(24.5, 53, r, skin) + c(75.5, 53, r, skin);
+const shirt = p('M42 81 L50 93 L58 81 L55 78.5 L45 78.5Z', WHITE);
+const lapels = l('M42 81 L47.5 98', K, 1.1) + l('M58 81 L52.5 98', K, 1.1);
+const tie = (color: string, long = false): string =>
+  p(long ? 'M48 85 L52 85 L54.5 100 L50 104 L45.5 100Z' : 'M48 85 L52 85 L54 101 L46 101Z', color, 0.9);
+const suit = (color: string, tieColor: string, long = false) => ({ clothes: shoulders(color), front: shirt + tie(tieColor, long) + lapels });
+
+const NOSE = {
+  soft: l('M50 54 Q46.5 61 51 62', SH, 1.3),
+  big: l('M50 52 Q43.5 62 52.5 63.5', SH, 1.5),
+  long: l('M50 50 Q45.5 63 51.5 64', SH, 1.4),
+  snub: l('M46.5 59 Q50 64.5 53.5 59', SH, 1.5),
+};
+const FOREHEAD = l('M38 31 Q50 28 62 31', SH, 0.9, 0.8) + l('M40 35 Q50 32.5 60 35', SH, 0.9, 0.8);
+const SMILE_LINES = l('M36.5 60 Q33.5 67 37.5 73', SH, 1, 0.85) + l('M63.5 60 Q66.5 67 62.5 73', SH, 1, 0.85);
+const UNDER_EYES = l('M35 57.5 Q39.5 59.5 44 57.5', SH, 0.9, 0.7) + l('M56 57.5 Q60.5 59.5 65 57.5', SH, 0.9, 0.7);
+
+const glassesRound = (color: string, sw = 1.4): string =>
+  `<g fill="none" stroke="${color}" stroke-width="${sw}"><circle cx="39.5" cy="51" r="8.4"/><circle cx="60.5" cy="51" r="8.4"/><path d="M47.9 50 Q50 48.5 52.1 50"/><path d="M31.1 50 L25 48.5"/><path d="M68.9 50 L75 48.5"/></g>`;
+const glassesSquare = (color: string, sw = 2): string =>
+  `<g fill="none" stroke="${color}" stroke-width="${sw}"><rect x="29.5" y="43.5" width="19" height="15" rx="4"/><rect x="51.5" y="43.5" width="19" height="15" rx="4"/><path d="M48.5 49 L51.5 49"/><path d="M29.5 49 L25 47.5"/><path d="M70.5 49 L75 47.5"/></g>`;
+const glassesThin = (color: string): string =>
+  `<g fill="none" stroke="${color}" stroke-width="1.2"><ellipse cx="39.5" cy="51" rx="9.2" ry="6.2"/><ellipse cx="60.5" cy="51" rx="9.2" ry="6.2"/><path d="M48.7 50 L51.3 50"/><path d="M30.3 50 L25 48.5"/><path d="M69.7 50 L75 48.5"/></g>`;
+const mustache = (color: string): string =>
+  p('M38 61.5 Q44 57 50 60 Q56 57 62 61.5 Q56 64 50 62.8 Q44 64 38 61.5Z', color, 0.7);
+
+export interface Figure {
+  name: string;
+  skin: string;
+  face: keyof typeof FACE;
+  brow: string;          // 눈썹 색
+  browH?: number;        // 눈썹 굵기 (기본 3)
+  earR?: number;
+  clothes: string;
+  back?: string;
+  front?: string;
+  marks?: string;
+  hair?: string;
+  beard?: string;
+  over?: string;
+  top?: string;
+}
+
+export const FIGURES: Figure[] = [
+  { name: '일론 머스크', skin: '#F0CBA8', face: 'square', brow: '#3A2A20',
+    clothes: shoulders('#1F1F24'), front: p('M40 82 Q50 91 60 82 L58 79 L42 79Z', '#3A3A42'),
+    marks: NOSE.soft + l('M56 71 Q60 70 62 67', SH, 1, 0.8),
+    hair: p('M25 44 Q21 15 50 15 Q79 15 75 44 Q73 31 61 27 Q45 23 34 29 Q28 33 25 44Z', '#3A2A20') },
+
+  { name: '스티브 잡스', skin: '#EFC9A9', face: 'long', brow: '#6E6E6E',
+    clothes: shoulders('#161618'), front: p('M40 74 Q50 79 60 74 L61.5 86 Q50 91 38.5 86Z', '#232327'),
+    marks: NOSE.long + FOREHEAD,
+    hair: soft('M30 31 Q50 13 70 31 Q50 23 30 31Z', '#8E8E8E', 0.5)
+      + both((f) => p(`M${f(28)} 47 Q${f(25)} 31 ${f(33)} 24 L${f(34)} 39Z`, '#8E8E8E')),
+    beard: soft('M29 58 Q30 79 50 86 Q70 79 71 58 Q66 74 50 76 Q34 74 29 58Z', '#7A7A7A', 0.55),
+    over: glassesRound('#2B2B2B', 1.2) },
+
+  { name: '워런 버핏', skin: '#F2CDB5', face: 'jowly', brow: '#D8D8D8', ...suit('#27344D', '#B8322C'),
+    marks: NOSE.big + FOREHEAD + SMILE_LINES,
+    hair: p('M24 44 Q20 18 50 17 Q80 18 76 44 Q73 30 56 28 Q38 27 30 33 Q26 37 24 44Z', '#EFEFEF'),
+    over: glassesSquare('#4B3A2C', 2.2) },
+
+  { name: '샘 올트먼', skin: '#F1CCAB', face: 'long', brow: '#5B4131',
+    clothes: shoulders('#5F6B7A'), front: p('M41 81 Q50 89 59 81 L57 78.5 L43 78.5Z', '#4F5A68'),
+    marks: NOSE.soft,
+    hair: p('M27 44 Q24 22 31 25 Q32 15 40 21 Q44 11 51 20 Q57 11 62 21 Q69 15 70 25 Q76 22 73 44 Q70 31 60 29 Q46 26 36 30 Q30 34 27 44Z', '#5B4131') },
+
+  { name: '도널드 트럼프', skin: '#EFA76B', face: 'jowly', brow: '#D9AE45', browH: 3.4, ...suit('#1F2A44', '#C8242B', true),
+    marks: `<ellipse cx="39.5" cy="50.5" rx="8.4" ry="6.6" fill="#F9DAB6" opacity=".85"/><ellipse cx="60.5" cy="50.5" rx="8.4" ry="6.6" fill="#F9DAB6" opacity=".85"/>${NOSE.big}${SMILE_LINES}`,
+    hair: p('M20 46 Q11 11 54 10 Q93 9 81 44 Q78 26 58 27 Q40 26 30 32 Q22 37 20 46Z', '#F3CB52')
+      + l('M26 31 Q50 16 79 27', '#C99A2E', 1.1) + l('M30 27 Q52 15 74 22', '#C99A2E', 0.9) },
+
+  { name: '박태준', skin: '#E9BE98', face: 'square', brow: '#2A2A2A',
+    clothes: shoulders('#3F5F86'), front: p('M42 81 L50 90 L58 81 L63 84.5 L54 96 L50 91.5 L46 96 L37 84.5Z', '#35527A'),
+    marks: NOSE.soft + SMILE_LINES,
+    hair: both((f) => p(`M${f(26)} 48 Q${f(25)} 38 ${f(27.5)} 36 L${f(30.5)} 38 L${f(29.5)} 48Z`, '#2A2A2A', 0.8)),
+    over: glassesThin('#3A3A3A')
+      + p('M22 36 Q22 9 50 9 Q78 9 78 36Z', '#F5F4EE') + p('M46.5 9.6 L53.5 9.6 L53.5 34 L46.5 34Z', '#2F6DB5', 0.8)
+      + p('M14 34 L86 34 Q88.5 39.5 84 39.5 L16 39.5 Q11.5 39.5 14 34Z', '#E4E2D8') },
+
+  { name: '박정희', skin: '#D8A67C', face: 'long', brow: '#17171A', ...suit('#2A2A30', '#17171A'),
+    marks: NOSE.long + l('M38 62 Q35.5 68 38.5 73', SH, 1, 0.85) + l('M62 62 Q64.5 68 61.5 73', SH, 1, 0.85),
+    hair: p('M28 43 Q26 18 50 18 Q74 18 72 43 Q68 28 50 27 Q32 28 28 43Z', '#17171A'),
+    over: `<g fill="#101012" stroke="${K}" stroke-width=".8"><rect x="29.5" y="45" width="19" height="12.5" rx="4.5"/><rect x="51.5" y="45" width="19" height="12.5" rx="4.5"/></g>${l('M48.5 48.5 L51.5 48.5', '#101012', 2)}${l('M29.5 49 L25 47.5', '#101012', 1.4)}${l('M70.5 49 L75 47.5', '#101012', 1.4)}` },
+
+  { name: '이순신', skin: '#E2B38A', face: 'round', brow: '#1A1A1A', browH: 3.6,
+    clothes: shoulders('#7C1E1E') + l('M16 92 Q34 86 42 84', GOLD, 1.4) + l('M84 92 Q66 86 58 84', GOLD, 1.4),
+    back: both((f) => p(`M${f(13)} 41 L${f(26)} 36 L${f(27)} 75 L${f(15)} 80Z`, '#7C1E1E')
+      + [46, 56, 66].map((y) => c(f(19.5), y, 1.5, GOLD, 0.5)).join('')),
+    front: p('M42 81 L50 90 L58 81 L55 78.5 L45 78.5Z', GOLD),
+    marks: NOSE.soft,
+    beard: both((f) => p(`M${f(27)} 58 Q${f(30)} 78 ${f(44)} 83 L${f(44)} 77 Q${f(34)} 72 ${f(31.5)} 58Z`, '#1A1A1A', 0.8))
+      + mustache('#1A1A1A') + p('M44 77 Q50 80 56 77 L52.5 95 Q50 98 47.5 95Z', '#1A1A1A', 0.8),
+    over: p('M23 37 Q23 11 50 11 Q77 11 77 37Z', '#3C3C44') + p('M45.5 12 L54.5 12 L55.5 34 L44.5 34Z', GOLD, 0.8)
+      + p('M19 34 L81 34 L83.5 40.5 L16.5 40.5Z', GOLD),
+    top: l('M50 11 L50 4', K, 2.2) + c(50, 2.5, 3.4, '#C0392B') },
+
+  { name: '세종대왕', skin: '#EEC8A0', face: 'round', brow: '#1A1A1A',
+    clothes: shoulders('#B5232A') + c(50, 98, 6.5, '#E2B43C', 0.9),
+    front: p('M42 81 L50 91 L58 81 L56 78 L50 86 L44 78Z', WHITE),
+    marks: NOSE.soft + SMILE_LINES,
+    beard: mustache('#1A1A1A') + p('M46 78 Q50 80 54 78 L51.6 91 Q50 93 48.4 91Z', '#1A1A1A', 0.8),
+    over: both((f) => p(`M${f(35)} 10 Q${f(32)} 1.5 ${f(38)} 1 Q${f(43)} 2.5 ${f(42)} 10Z`, '#1B1B20'))
+      + p('M31 25 Q31 6 50 6 Q69 6 69 25Z', '#1B1B20')
+      + p('M23 39 Q22 17 50 17 Q78 17 77 39 Q64 33.5 50 33.5 Q36 33.5 23 39Z', '#25252C')
+      + l('M30 27 Q50 21 70 27', '#4A4A55', 1) },
+
+  { name: '소크라테스', skin: '#E1B48C', face: 'round', brow: '#DADADA', browH: 3.6,
+    clothes: shoulders('#E9E3D2') + l('M22 98 Q40 88 56 84', '#B9B09A', 1.2) + l('M34 100 Q50 92 64 86', '#B9B09A', 1.2),
+    back: both((f) => c(f(23.5), 45, 6, '#ECECEC') + c(f(22.5), 55, 5.5, '#ECECEC')),
+    marks: NOSE.snub + FOREHEAD + l('M36 27 Q50 24 64 27', SH, 0.9, 0.7),
+    beard: [[27, 64], [31, 74], [39, 81], [50, 84.5], [61, 81], [69, 74], [73, 64]].map(([x, y]) => c(x, y, 7.2, '#ECECEC')).join('')
+      + soft('M30 62 Q50 78 70 62 Q66 84 50 86 Q34 84 30 62Z', '#ECECEC', 1)
+      + p('M37 62 Q44 56.5 50 60 Q56 56.5 63 62 Q56 66 50 64 Q44 66 37 62Z', '#F6F6F6', 0.8) },
+
+  { name: '니콜로 마키아벨리', skin: '#E9C2A0', face: 'long', brow: '#2B2220',
+    clothes: shoulders('#8C1C1C'), front: p('M40 80 L50 86 L60 80 L62.5 86.5 L50 94 L37.5 86.5Z', '#1A1A1A'),
+    marks: NOSE.long + l('M35 60 Q36 68 40 73', SH, 1, 0.8) + l('M65 60 Q64 68 60 73', SH, 1, 0.8),
+    hair: p('M28 45 Q25 20 50 19 Q75 20 72 45 Q70 31 62 27 Q50 21.5 38 27 Q30 31 28 45Z', '#2B2220') },
+
+  { name: '장 자크 루소', skin: '#F0CDB2', face: 'oval', brow: '#8A7A6A',
+    clothes: shoulders('#5C4033'), front: p('M43 79 L57 79 L55.5 93 L50 96.5 L44.5 93Z', WHITE) + l('M47 84 L53 84', '#C9C4B8', 0.9) + l('M47.5 88 L52.5 88', '#C9C4B8', 0.9),
+    back: both((f) => c(f(23.5), 49, 5.8, '#D8D8D8') + c(f(22.5), 59, 5.4, '#D8D8D8')),
+    marks: NOSE.soft,
+    over: p('M20 39 Q15 8 50 8 Q85 8 80 39 Q66 31.5 50 31.5 Q34 31.5 20 39Z', '#6B4A2E')
+      + l('M25 26 Q50 12 75 26', '#9A744C', 1.6, 0.9).replace('stroke-linecap', 'stroke-dasharray="2.2 3.6" stroke-linecap')
+      + l('M23 33 Q50 22 77 33', '#9A744C', 1.6, 0.9).replace('stroke-linecap', 'stroke-dasharray="2.2 3.6" stroke-linecap') },
+
+  { name: '마하트마 간디', skin: '#B57A50', face: 'long', brow: '#8A8A8A', earR: 6.6,
+    clothes: p('M12 102 Q16 84 38 80 Q50 89 62 80 Q84 84 88 102Z', '#F1EDE2') + l('M24 96 Q38 88 46 86', '#C9C3B2', 1.1) + l('M76 96 Q62 88 54 86', '#C9C3B2', 1.1),
+    marks: NOSE.big + FOREHEAD + SMILE_LINES,
+    beard: p('M40 61.5 Q45 58 50 60.3 Q55 58 60 61.5 Q55 64 50 63 Q45 64 40 61.5Z', '#EDEDED', 0.7),
+    over: glassesRound('#3F3526', 1.3) },
+
+  { name: '정주영', skin: '#E5B68D', face: 'round', brow: '#3F3F42', ...suit('#4B5563', '#1F3A6B'),
+    marks: NOSE.big + FOREHEAD + SMILE_LINES,
+    hair: p('M24 45 Q21 19 50 19 Q79 19 76 45 Q72 33 64 29 Q50 21 36 29 Q28 33 24 45Z', '#3F3F42'),
+    over: glassesSquare('#2E2E30', 2) },
+
+  { name: '이건희', skin: '#EEC6A2', face: 'oval', brow: '#8F8F8F', ...suit('#23242B', '#2F5D9B'),
+    marks: NOSE.soft + UNDER_EYES + SMILE_LINES,
+    hair: p('M26 45 Q23 18 50 18 Q77 18 74 45 Q72 30 60 27 L42 30 Q31 33 26 45Z', '#BDBDBD'),
+    over: glassesThin('#4A4A4A') },
+
+  { name: '블라디미르 푸틴', skin: '#F0CDB0', face: 'oval', brow: '#B9A88A', ...suit('#1E2638', '#6E1F2B'),
+    marks: NOSE.soft + UNDER_EYES + FOREHEAD + l('M37 62 Q35 68 38 73', SH, 1, 0.8) + l('M63 62 Q65 68 62 73', SH, 1, 0.8),
+    hair: p('M29 39 Q28 21 50 21 Q72 21 71 39 Q65 29.5 50 29 Q35 29.5 29 39Z', '#CDBDA0') },
+
+  { name: '시진핑', skin: '#EBC39B', face: 'jowly', brow: '#141416', ...suit('#20222A', '#C4262E'),
+    marks: NOSE.soft + SMILE_LINES,
+    hair: p('M22 47 Q17 16 50 16 Q83 16 78 47 Q76 31 62 29 Q46 27 34 31 Q25 35 22 47Z', '#141416') },
+
+  { name: '나폴레옹', skin: '#F0D0B4', face: 'round', brow: '#3A2A20',
+    clothes: shoulders('#1F2F5C') + both((f) => p(`M${f(11)} 89 L${f(30)} 85 L${f(31)} 91.5 L${f(12)} 96Z`, GOLD)),
+    front: p('M42 81 L50 93 L58 81 L55 78.5 L45 78.5Z', WHITE) + p('M40 78 L50 84 L60 78 L62.5 85 L57 88 L50 84.5 L43 88 L37.5 85Z', '#B5302A'),
+    marks: NOSE.long,
+    hair: p('M37 22 Q46 39 61 27 Q50 24 37 22Z', '#3A2A20') + both((f) => p(`M${f(25)} 47 Q${f(24)} 36 ${f(28)} 32 L${f(30)} 46Z`, '#3A2A20', 0.8)),
+    top: p('M3 35 Q25 3 50 3 Q75 3 97 35 Q74 25.5 50 25.5 Q26 25.5 3 35Z', '#1B1B20') + l('M9 31 Q28 8 50 8 Q72 8 91 31', GOLD, 1.3)
+      + c(50, 15.5, 4.8, '#B5302A', 0.7) + c(50, 15.5, 2.9, WHITE, 0) + c(50, 15.5, 1.4, '#1F3F8F', 0) },
+
+  { name: '프리드리히 니체', skin: '#EFCDB2', face: 'square', brow: '#3B2A1E', browH: 4.6,
+    clothes: shoulders('#2B2B30'), front: shirt + p('M47 84 L53 84 L54 90 L50 92 L46 90Z', '#17171A', 0.9) + lapels,
+    marks: NOSE.long + FOREHEAD,
+    hair: p('M24 45 Q17 12 52 13 Q85 14 76 45 Q72 28 54 26 Q36 25 24 45Z', '#3B2A1E'),
+    over: p('M26 62 Q38 52.5 50 59 Q62 52.5 74 62 Q73 77 50 68.5 Q27 77 26 62Z', '#3B2A1E') },
+
+  { name: '이마누엘 칸트', skin: '#F2D6BE', face: 'long', brow: '#B5B5B5',
+    clothes: shoulders('#6A4B35'), front: p('M44 79 L56 79 L57.5 88 L50 96 L42.5 88Z', WHITE) + l('M46 84 Q50 86 54 84', '#C9C4B8', 0.9) + l('M46.5 89 Q50 91 53.5 89', '#C9C4B8', 0.9),
+    back: both((f) => c(f(24), 47, 5.8, '#DCDCDC') + c(f(23.5), 57, 5.2, '#DCDCDC')) + p('M46 86 L54 86 L54 91 L46 91Z', '#17171A', 0.8),
+    marks: NOSE.long + FOREHEAD,
+    hair: p('M27 42 Q25 15 50 15 Q75 15 73 42 Q66 27 50 26 Q34 27 27 42Z', '#DCDCDC') + l('M34 24 Q50 17 66 24', '#B8B8B8', 0.9) },
+
+  { name: '노자', skin: '#E8C29A', face: 'round', brow: '#D5D5D5',
+    clothes: shoulders('#6E7F5A'), front: p('M42 81 L50 91 L58 81 L56 78 L50 86 L44 78Z', '#EFE7CF'),
+    back: c(50, 13, 8.2, '#F0F0F0') + p('M44.5 19.5 L55.5 19.5 L55.5 23.5 L44.5 23.5Z', '#6E7F5A', 0.8),
+    marks: NOSE.soft + FOREHEAD + SMILE_LINES,
+    hair: both((f) => p(`M${f(25)} 47 Q${f(22.5)} 31 ${f(31)} 24 L${f(32)} 40Z`, '#F0F0F0')),
+    beard: p('M36 72 Q50 80 64 72 L56 100 Q50 106 44 100Z', '#F0F0F0'),
+    over: p('M40 62 Q46 58.5 50 60.5 Q54 58.5 60 62 L64.5 77 L60.5 77 L56 64.5 Q50 66 44 64.5 L39.5 77 L35.5 77Z', '#F6F6F6', 0.8)
+      + l('M33 41 Q25 45 22.5 58', '#F0F0F0', 2.4) + l('M67 41 Q75 45 77.5 58', '#F0F0F0', 2.4) },
+
+  { name: '아이작 뉴턴', skin: '#F3D8C2', face: 'long', brow: '#8C7B66',
+    clothes: shoulders('#3B2F2F'),
+    back: p('M50 12 Q18 9 14 44 Q10 72 18 102 L38 102 Q28 72 29 46 Q32 26 50 26 Q68 26 71 46 Q72 72 62 102 L82 102 Q90 72 86 44 Q82 9 50 12Z', '#B9A58B')
+      + l('M19 52 q5 4 0 8 q-5 4 0 8 q5 4 0 8 q-5 4 0 8', '#8C7B66', 1.1) + l('M81 52 q-5 4 0 8 q5 4 0 8 q-5 4 0 8 q5 4 0 8', '#8C7B66', 1.1),
+    front: p('M43 79 L57 79 L55.5 93 L50 96.5 L44.5 93Z', WHITE),
+    marks: NOSE.long,
+    hair: p('M28 43 Q28 17 50 16 Q72 17 72 43 Q64 29.5 50 28.5 Q36 29.5 28 43Z', '#B9A58B') + l('M50 16 L50 28', '#8C7B66', 1) },
+];
+
+/** 둥근 틀 안에 들어가는 그림(눈썹·눈·입 아래). */
+export function figureBase(v: Figure): string {
+  return `${v.clothes}${v.back ?? ''}${neck(v.skin)}${v.front ?? ''}${ears(v.skin, v.earR)}${p(FACE[v.face], v.skin, 1.2)}${v.marks ?? ''}${v.hair ?? ''}${v.beard ?? ''}`;
+}
