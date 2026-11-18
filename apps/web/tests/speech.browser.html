@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko" spellcheck="false" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI-Talk 구조가 있는 발언 모아 보기</title>
+    <style>
+      body { padding: 1.5rem; max-width: 56rem; margin: 0 auto; }
+      #bar { display: flex; gap: .5rem; margin-bottom: 1.25rem; }
+      #list { display: grid; gap: .875rem; }
+      #list .sp { animation: none; content-visibility: visible; grid-template-columns: 0 minmax(0, 1fr); }
+    </style>
+  </head>
+  <body>
+    <!-- Vite 개발 서버(apps/web에서 npm run dev)를 띄운 뒤 /tests/speech.browser.html 을 연다.
+         줄글, 굵게, 목록, 표, 막대 그림이 든 발언을 토론 화면의 발언 카드 모양으로 모아 본다. 서버를 부르지 않는다.
+         "흘려 보기"를 누르면 글자가 오는 중의 모습을 낱말 단위로 다시 그린다. -->
+    <div id="bar"></div>
+    <div id="list"></div>
+    <script type="module">
+      import '/src/styles/app.css';
+      import { CitationRegistry, parseCitations } from '/src/citations.ts';
+      import { drawSpeech, renderSpeech, speechBlocks, speechLength } from '/src/ui/speech.ts';
+      import { installTooltips } from '/src/ui/dom.ts';
+
+      installTooltips();
+      const SAMPLES = [
+        ['#7BC4E8', '경제학자', '아니, 그게 아니라요. 방금 말씀은 듣기엔 그럴듯한데 **앞뒤가 안 맞잖아요**. 비용 얘기를 쏙 빼고 하시면 곤란하죠.'],
+        ['#E8A07B', '현장 엔지니어', '제가 반대하는 이유는 셋입니다.\n- 지금 인력으로는 **유지보수**가 안 됩니다\n- 부품 수급이 석 달씩 밀리고 있고요 ([reuters.com](https://www.reuters.com/a))\n- 사고가 나면 책임질 사람이 없죠\n이걸 두고 준비됐다고 하시면 저는 할 말이 없네요.'],
+        ['#9BD68A', '정책 연구원', '말로만 하면 헷갈리니 나란히 놓고 보시죠.\n| 기준 | 원전 | 태양광 |\n|---|---|---|\n| 건설 기간 | 10년 안팎 | 1~2년 |\n| 가동률 | 높음 | 날씨에 따라 다름 |\n| 초기 비용 | 큼 | 작음 |\n어느 한쪽이 다 이기는 표가 아니라는 게 제 요점입니다.'],
+        ['#D6A0E8', '데이터 분석가', '숫자로 보면 얘기가 달라집니다. 어림한 값이긴 한데요.\n```chart\n제목: 연도별 판매량\n단위: 만 대\n2021년: 8\n2022년: 12\n2023년: 18\n2024년(어림): 약 25\n```\n3년 만에 세 배죠. 이걸 정체라고 부르실 건가요?'],
+        ['#E8C170', '은퇴 교사', '1. 먼저 아이들 얘기부터 하죠\n2. 그다음이 예산입니다\n순서가 바뀌면 안 된다는 겁니다.'],
+      ];
+      const registry = new CitationRegistry();
+      const list = document.getElementById('list');
+      const cards = SAMPLES.map(([color, name, text], k) => {
+        const body = document.createElement('div');
+        body.className = 'sp-text';
+        const head = document.createElement('div');
+        head.className = 'sp-head';
+        head.innerHTML = `<span class="sp-name"></span><span class="sp-no">#${k + 1}</span>`;
+        head.firstChild.textContent = name;
+        const wrap = document.createElement('div');
+        wrap.append(head, body);
+        const card = document.createElement('article');
+        card.className = 'sp';
+        card.style.setProperty('--c', color);
+        card.append(document.createElement('span'), wrap);
+        list.append(card);
+        return { body, text };
+      });
+      const settle = () => cards.forEach(({ body, text }) => { body.replaceChildren(); renderSpeech(body, text, registry); });
+      const button = (label, onclick) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'chip';
+        b.textContent = label;
+        b.addEventListener('click', onclick);
+        document.getElementById('bar').append(b);
+      };
+      button('흘려 보기', () => cards.forEach(({ body, text }) => {
+        const units = text.match(/\s*\S+\s*/g) ?? [];
+        const times = [];
+        let raw = '';
+        const tick = () => {
+          if (!units.length) { window.setTimeout(() => { body.replaceChildren(); renderSpeech(body, text, registry); }, 1500); return; }
+          raw += units.shift();
+          const blocks = speechBlocks(parseCitations(raw, registry, { streaming: true }), true);
+          const now = performance.now();
+          const total = speechLength(blocks);
+          const count = total - times.length;
+          if (count < 0) times.length = total;
+          for (let i = 0; i < count; i += 1) times.push(now + i * Math.min(70, 600 / count));
+          body.replaceChildren();
+          drawSpeech(body, blocks, (i) => (times[i] - now > -550 ? times[i] - now : null));
+          window.setTimeout(tick, 160);
+        };
+        tick();
+      }));
+      button('밝은 테마', () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === 'light' ? 'dark' : 'light'; });
+      window.__half = () => cards.forEach(({ body, text }) => {   // 확인용: 글의 절반만 온 순간
+        body.replaceChildren();
+        drawSpeech(body, speechBlocks(parseCitations(text.slice(0, Math.floor(text.length * 0.6)), registry, { streaming: true }), true));
+      });
+      settle();
+    </script>
+  </body>
+</html>

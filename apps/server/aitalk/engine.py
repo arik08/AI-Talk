@@ -87,6 +87,7 @@ class Debate:
              "avatar": {"set": "crest", "variant": 0}} if config.get("moderator") else None)
         self.by_name = {p["name"]: p for p in self.people}
         self.rng = random.Random(config.get("seed"))
+        self.style_rng = random.Random(config.get("seed"))   # 말의 날·구조 한 줄을 붙일지. 차례를 정하는 난수와 섞지 않는다
 
         self.events: list[dict] = []
         self.subs: set[asyncio.Queue] = set()
@@ -947,8 +948,13 @@ class Debate:
                          + directive + " 길이: 1~2문장.")
         else:
             directive += " " + self._len(row.get("length", ""))
+            key = self.cfg.get("length", "normal")
+            if key == "auto":
+                key = row.get("length", "")
+            if key != "short" and intent in ("add", "rebut") and self.style_rng.random() < prompts.FORM_CHANCE:
+                directive += " " + prompts.FORM_HINT   # 근거를 펼 만한 발언에만, 가끔
         edge = prompts.edge_hint(row["mood"], intent, self.cfg.get("tone") or "default")
-        if edge and self.rng.random() < prompts.EDGE_CHANCE:   # 발언마다 날을 세우면 말싸움만 남는다
+        if edge and self.style_rng.random() < prompts.EDGE_CHANCE:   # 발언마다 날을 세우면 말싸움만 남는다
             directive += " " + edge
         return Turn(speaker, "free", directive, "free", intent=intent,
                     target=target["id"] if target else "", mood=row["mood"], interject=interject)
@@ -961,6 +967,9 @@ class Debate:
         low = max(self._pos + 12, int(len(text) * 0.35))
         high = int(len(text) * 0.85)
         for match in re.finditer(r"[.?!…][\"”']?\s+", text):
+            head = text[: match.end()]
+            if head.count("```") % 2 or head.rsplit("\n", 1)[-1].lstrip().startswith("|"):
+                continue   # 막대 그림이나 표의 한가운데에서는 끊지 않는다
             if low <= match.end() <= high:
                 self._cut = match.end()
                 self.ctx.amend_last(text[: self._cut].rstrip() + " —")

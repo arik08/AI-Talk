@@ -431,6 +431,26 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 @keyframes ch-in { 0% { opacity: 0; color: var(--ct, var(--c)); } 45% { opacity: 1; color: var(--ct, var(--c)); } 100% { opacity: 1; } }
 .sp-text .caret { display: inline-block; width: .5rem; height: 1.05em; margin-left: .125rem; vertical-align: -.15em; background: var(--c); animation: pulse .9s steps(2) infinite; }
 .sp-cut { color: var(--ember); font-weight: 600; }
+/* 구조가 있는 발언: 굵게, 목록, 표, 막대 그림. 줄글뿐인 발언은 예전 모양 그대로다 */
+.sp-text strong { font-weight: 700; color: var(--gold-hi); }
+:root[data-theme="light"] .sp-text strong { color: inherit; }
+.sp-rich { white-space: normal; display: grid; gap: .5rem; }
+.sp-rich .sp-p { white-space: pre-wrap; }
+.sp-list { margin: 0; padding-left: 1.5rem; display: grid; gap: .25rem; }
+.sp-list li::marker { color: var(--ct, var(--c)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sp-table-wrap { max-width: 100%; overflow-x: auto; }
+.sp-table { border-collapse: collapse; font-size: .9375rem; line-height: 1.55; }
+.sp-table th { text-align: left; font-weight: 600; color: var(--muted); padding: .375rem .875rem .375rem 0; border-bottom: 1px solid var(--line-hi); white-space: nowrap; }
+.sp-table td { padding: .375rem .875rem .375rem 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; vertical-align: top; }
+.sp-table tr:last-child td { border-bottom: 0; }
+.sp-chart { margin: 0; max-width: 36rem; }
+.sp-chart figcaption { margin-bottom: .375rem; color: var(--muted); font-size: .875rem; }
+.sp-bars { display: grid; grid-template-columns: minmax(0, max-content) minmax(8rem, 1fr); gap: .375rem .75rem; align-items: center; font-size: .9375rem; line-height: 1.4; }
+.sp-bar { display: contents; }
+.sp-bar-label { max-width: 14rem; color: var(--text); overflow-wrap: anywhere; }
+.sp-bar-track { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.sp-bar-track i { flex: none; width: calc((100% - 7rem) * var(--v, 0)); min-width: 2px; height: .75rem; border-radius: 0 4px 4px 0; background: var(--ct, var(--c)); }
+.sp-bar-val { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* 각주와 출처: 본문에는 번호만, 마지막 문장 옆의 링크 아이콘을 누르면 도메인별 목록이 펼쳐진다 */
 .fn { margin: 0 .0625rem; color: var(--gold); font-size: .8125rem; font-variant-numeric: tabular-nums; vertical-align: .25em; line-height: 1; white-space: nowrap; text-decoration: none; }
 .fn:hover, .fn:focus-visible { color: var(--gold-hi); text-decoration: underline; }

@@ -9,10 +9,12 @@ import { copyText, recordToMarkdown } from '../export';
 import type { AppContext } from '../main';
 import { INTENT_LABEL, MOOD_LABEL, TONE_LABEL, type DebateEvent, type DebateRecord, type Mood, type Persona } from '../types';
 import { clear, fmtCost, fmtTime, h, icon, put, safeColor, toast, USD_KRW } from '../ui/dom';
-import { citeLink, renderCited, segmentNodes, sourceList, sourceToggle } from '../ui/sources';
+import { renderCited, sourceList, sourceToggle } from '../ui/sources';
+import { drawSpeech, renderSpeech, speechBlocks, speechLength } from '../ui/speech';
 
 interface Seat { persona: Persona; tile: HTMLElement; av: HTMLElement; urge: HTMLElement; status: HTMLElement; badge: HTMLElement }
-interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; av: HTMLElement; speaker: string; cut: boolean; started: boolean; raw: string; shown: string }
+interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; av: HTMLElement; speaker: string; cut: boolean; started: boolean; raw: string; times: number[] }
+const CH_IN_MS = 550;   // 글자 하나가 나타나는 움직임의 길이 (app.css의 ch-in과 같다)
 
 const SPEEDS: [string, string][] = [['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']];
 const CPS: Record<string, number> = { slow: 8, normal: 14, fast: 26 };   // 서버가 글자를 내보내는 속도와 같다
@@ -274,7 +276,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const cls = ['sp', 'is-live', ev.interject ? 'sp--interject' : '', p.id === 'moderator' ? 'sp--mod' : ''].filter(Boolean).join(' ');
     const rootEl = h('article', { class: cls, style: `--c:${color}` }, av, body);
     inner.append(rootEl);
-    liveCard = { root: rootEl, text, body, av, speaker: ev.speaker, cut: false, started: false, raw: '', shown: '' };
+    liveCard = { root: rootEl, text, body, av, speaker: ev.speaker, cut: false, started: false, raw: '', times: [] };
     cards.set(ev.id, liveCard);
     follow();
   }
@@ -286,36 +288,21 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     if (!card.started) { clear(card.text); card.started = true; }
     // 받은 글 전체를 다시 읽어 링크를 각주로 바꾼다. 아직 닫히지 않은 링크와 내부 표식은 보여 주지 않는다
     card.raw += String(ev.text);
-    const segments = parseCitations(card.raw, registry, { streaming: true });
-    const drawn = segments.map((s) => (s.kind === 'text' ? s.text : `\u0000${s.n}\u0000`)).join('');
-    if (!drawn.startsWith(card.shown)) {   // 앞에 그린 글이 달라졌으면 통째로 다시 그린다
-      clear(card.text);
-      card.text.append(...segmentNodes(segments));
-      card.shown = drawn;
-      follow();
-      return;
-    }
-    const fresh = drawn.slice(card.shown.length);
-    card.shown = drawn;
-    const count = Array.from(fresh).length;
+    // 목록, 표, 막대 그림은 글자가 올 때마다 모양이 바뀌므로 통째로 다시 그린다.
+    // 글자마다 나타날 시각을 적어 두어, 다시 그려도 나타나던 글자는 하던 움직임을 이어 간다
+    const blocks = speechBlocks(parseCitations(card.raw, registry, { streaming: true }), true);
+    const total = speechLength(blocks);
+    const now = performance.now();
+    const count = total - card.times.length;
+    if (count < 0) card.times.length = total;   // 표기가 닫히며 글자 수가 줄었다
     const quick = instant || speed === 'instant' || count > 80;
-    const step = count ? Math.min(1000 / (CPS[speed] ?? 14) / (replaying ? replayRate : 1), 600 / count) : 0;
-    const frag = document.createDocumentFragment();
-    let at = 0;
-    fresh.split(/\u0000(\d+)\u0000/).forEach((part, index) => {
-      if (index % 2) {   // 각주 번호
-        const entry = registry.list()[Number(part) - 1];
-        if (entry) frag.append(citeLink(entry.n, entry.url));
-      } else if (quick) {
-        frag.append(part);
-      } else {
-        for (const ch of Array.from(part)) {
-          frag.append(h('span', { class: 'ch', style: `animation-delay:${Math.round(at * step)}ms` }, ch));
-          at += 1;
-        }
-      }
+    const step = count > 0 ? Math.min(1000 / (CPS[speed] ?? 14) / (replaying ? replayRate : 1), 600 / count) : 0;
+    for (let k = 0; k < count; k += 1) card.times.push(quick ? -Infinity : now + k * step);
+    clear(card.text);
+    drawSpeech(card.text, blocks, (index) => {
+      const wait = card.times[index] - now;
+      return wait > -CH_IN_MS ? wait : null;
     });
-    card.text.append(frag);
     follow();
   }
 
@@ -335,9 +322,9 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const settle = () => {
       if (!card.root.isConnected) return;
       clear(card.text);
-      renderCited(card.text, plain, registry);
-      if (ev.cut) card.text.append(h('span', { class: 'sp-cut' }, ' —'));
-      if (toggle) card.text.append(toggle.button);   // 마지막 문장 옆. 자리가 없으면 다음 줄로 넘어간다
+      const tail = renderSpeech(card.text, plain, registry);
+      if (ev.cut) tail.append(h('span', { class: 'sp-cut' }, ' —'));
+      if (toggle) tail.append(toggle.button);   // 마지막 문장 옆. 자리가 없으면 다음 줄로 넘어간다
     };
     if (!card.started || ev.cut) settle();
     else window.setTimeout(settle, 1500);   // 흘러나오는 움직임이 끝난 뒤 글자 조각을 한 덩어리로 합친다

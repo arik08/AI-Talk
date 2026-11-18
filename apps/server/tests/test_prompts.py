@@ -53,6 +53,16 @@ def test_edge_hint_follows_mood_intent_and_tone():
     assert all(" 님" not in h for h in prompts.EDGE_HINT.values())    # 시험용 AI가 '님' 앞의 낱말을 상대 이름으로 읽는다
 
 
+def test_rules_allow_structure_and_charts_when_they_help():
+    rules = prompts.RULES
+    assert "```chart" in rules and "'| 기준 | 가 | 나 |'" in rules and "**굵게**" in rules
+    assert "마크다운, 목록을 쓰지 않습니다" not in rules
+    assert "구조는 가끔 씁니다" in rules and "수치도 지어내지 않습니다" in rules
+    for tail in (prompts.speaker_tail("가온", "반박하세요."), prompts.pgpt_directive("가온", "반박하세요.")):
+        assert "마크다운" not in tail and "이름표, 따옴표, 지문은 쓰지 않습니다" in tail
+    assert "줄글로 말합니다" in prompts.FORM_HINT and " 님" not in prompts.FORM_HINT
+
+
 def test_director_instructions_live_in_the_shared_part_not_the_tail():
     shared = _shared()
     tail = prompts.director_question(["가온", "나래"], "가온")
