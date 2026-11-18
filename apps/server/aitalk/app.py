@@ -303,7 +303,7 @@ class DebateIn(BaseModel):
     language: str = "ko"
     summary: bool = True
     prep_cost: float = 0       # 토론을 시작하기 전에 든 비용(참가자 생성). 총 비용에 더한다
-    reactions: str = "smart"
+    reactions: str = "all"
     hidden_agenda: Optional[bool] = None
     compact_threshold: Optional[int] = None
 

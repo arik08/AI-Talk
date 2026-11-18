@@ -36,7 +36,7 @@ const draft = {
   perSpeaker: false,
   badge: 'on',
   summary: true,
-  reactions: 'smart',
+  reactions: 'all',
   tone: 'default',
   hiddenAgenda: null as boolean | null,
 };
