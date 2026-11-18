@@ -1,4 +1,4 @@
-export type AvatarSet = 'bot' | 'face' | 'orb' | 'crest';
+export type AvatarSet = 'bot' | 'face' | 'orb' | 'crest' | 'figure';
 export type AvatarSpec = { set: AvatarSet; variant: number };
 export type Mood = 'calm' | 'agree' | 'skeptical' | 'heated' | 'curious' | 'surprised' | 'amused' | 'thinking';
 export type AvatarState = 'idle' | 'listening' | 'ready' | 'speaking' | 'searching' | 'cut';

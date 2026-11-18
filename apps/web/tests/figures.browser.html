@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko" spellcheck="false" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI-Talk 인물 아바타 모아 보기</title>
+    <style>
+      body { padding: 1.5rem; }
+      #bar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: 1.25rem; }
+      #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 1.25rem .75rem; }
+      .cell { display: flex; flex-direction: column; align-items: center; gap: .625rem; padding: 1rem .5rem; }
+      .cell b { font-size: 1rem; font-weight: 600; }
+      .cell .small-row { display: flex; gap: .75rem; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <!-- Vite 개발 서버(apps/web에서 npm run dev)를 띄운 뒤 /tests/figures.browser.html 을 연다.
+         보관함 유명인 22명의 인물 아바타를 큰 크기와 화면에서 쓰는 크기(72, 44px)로 모아 본다. 서버를 부르지 않는다. -->
+    <div id="bar"></div>
+    <div id="grid"></div>
+    <script type="module">
+      import '/src/styles/app.css';
+      import '/src/styles/avatar.css';
+      import { FIGURES, createAvatar, setAvatar } from '/src/avatar/avatar.ts';
+      import { MOOD_LABEL, PALETTE } from '/src/types.ts';
+
+      const bar = document.getElementById('bar');
+      const grid = document.getElementById('grid');
+      let mood = 'calm';
+      let state = 'listening';
+      const avatars = [];
+      const button = (label, onclick) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'chip';
+        b.textContent = label;
+        b.addEventListener('click', onclick);
+        bar.append(b);
+        return b;
+      };
+      const repaint = () => avatars.forEach((av) => setAvatar(av, { mood, state }));
+      for (const [key, label] of Object.entries(MOOD_LABEL)) button(label, () => { mood = key; repaint(); });
+      button('말하는 중 / 듣는 중', () => { state = state === 'speaking' ? 'listening' : 'speaking'; repaint(); });
+      button('밝은 화면 / 어두운 화면', () => {
+        document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+      });
+
+      FIGURES.forEach((figure, i) => {
+        const color = PALETTE[i % PALETTE.length];
+        const sizes = [120, 72, 44].map((size) => {
+          const av = createAvatar({ set: 'figure', variant: i }, color, size);
+          avatars.push(av);
+          return av;
+        });
+        const cell = document.createElement('div');
+        cell.className = 'cell panel';
+        const name = document.createElement('b');
+        name.textContent = figure.name;
+        const row = document.createElement('div');
+        row.className = 'small-row';
+        row.append(sizes[1], sizes[2]);
+        cell.append(sizes[0], name, row);
+        grid.append(cell);
+      });
+      repaint();
+      window.__figures = FIGURES.length;
+    </script>
+  </body>
+</html>

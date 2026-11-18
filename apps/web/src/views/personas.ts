@@ -1,6 +1,6 @@
 import { Copy, Download, LoaderCircle, Pencil, Plus, Sparkles, Upload, X } from 'lucide';
 import { api } from '../api';
-import { AVATAR_SETS, createAvatar, normalizeSpec, setAvatar } from '../avatar/avatar';
+import { AVATAR_SETS, FIGURES, createAvatar, normalizeSpec, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { MOOD_LABEL, PALETTE, type AvatarSet, type Mood, type Persona } from '../types';
 import { clear, deleteButton, h, icon, safeColor, toast } from '../ui/dom';
@@ -133,7 +133,7 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
       for (let v = set.first; v < set.count; v += 1) {
         const small = createAvatar({ set: set.id, variant: v }, p.color, 44);
         small.classList.add('is-still');
-        pickGrid.append(h('button', { type: 'button', class: `av-pick${p.avatar.variant === v ? ' is-on' : ''}`, 'aria-label': `${set.label} ${v + 1}`,
+        pickGrid.append(h('button', { type: 'button', class: `av-pick${p.avatar.variant === v ? ' is-on' : ''}`, 'aria-label': set.id === 'figure' ? FIGURES[v].name : `${set.label} ${v + 1}`, tip: set.id === 'figure' ? FIGURES[v].name : null,
           onclick: () => { p.avatar = { set: set.id, variant: v }; paintAvatar(); } }, small));
       }
       clear(moodRow);

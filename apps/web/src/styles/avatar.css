@@ -166,6 +166,13 @@
 .av--face .head { fill: var(--c-dim); stroke: var(--cs); stroke-width: 2.2; transition: stroke .3s; }
 .av--face .hair { fill: var(--cs); }
 .av--face .glass { fill: none; stroke: var(--cs); stroke-width: 1.6; }
+/* 인물: 얼굴 세트 위에 얹는 특징. 밝은 머리(흰머리, 가발)는 선으로, 넥타이와 곤룡포는 붉게 */
+.av--figure .hair-l { fill: var(--c-soft); stroke: var(--cs); stroke-width: 1.6; stroke-linejoin: round; }
+.av--figure .shade { fill: var(--cs); }
+.av--figure .tie { fill: var(--hot); }
+.av--figure .helm { fill: var(--c-dim); }
+.av--figure .stub { stroke-width: 1.6; stroke-dasharray: 1.2 3.2; }
+.av--figure .fur { stroke: var(--c-dim); stroke-width: 2.2; stroke-dasharray: 2 4; }
 .av--face :is(.eye, .brow) {
   fill: var(--ink); transform-box: fill-box; transform-origin: center; transition: transform .26s var(--ease);
 }

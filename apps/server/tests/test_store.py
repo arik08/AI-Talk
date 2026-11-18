@@ -71,6 +71,8 @@ def test_presets_are_the_famous_people_set():
     for p in people:
         assert p["id"].startswith("preset_") and p["title"] and p["personality"] and p["speech"] and len(p["claims"]) >= 2
         assert p["hidden"] == ""          # 실존 인물에게 숨은 속내를 지어 붙이지 않는다
+    assert sorted(p["avatar"]["variant"] for p in people) == list(range(22))   # 인물마다 자기 얼굴 아바타 하나
+    assert all(p["avatar"]["set"] == "figure" for p in people)
 
 
 def test_old_preset_set_is_replaced_once_and_own_personas_are_kept(tmp_path, monkeypatch):

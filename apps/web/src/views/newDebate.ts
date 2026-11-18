@@ -2,7 +2,7 @@ import {
   ChevronRight, ClipboardPaste, Drama, FileText, Globe, Library, RotateCcw, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Square, SquareCheck, Upload, Users,
 } from 'lucide';
 import { api } from '../api';
-import { AVATAR_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
+import { AVATAR_SETS, RANDOM_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { PALETTE, type AvatarSet, type Mood, type Persona } from '../types';
 import { clear, deleteButton, fmtUsd, h, icon, put, safeColor, toast } from '../ui/dom';
@@ -226,7 +226,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     h('h2', { class: 'block-title' }, '참가자', h('small', null, '주제에 맞춰 AI가 만들거나, 보관함에서 고릅니다')),
     h('div', { class: 'cast-bar' },
       h('div', { class: 'stepper' }, minus, countLabel, plus), policy,
-      seg<AvatarSet | 'mix'>([...AVATAR_SETS.map((s) => [s.id, s.label] as [AvatarSet, string]), ['mix', '섞어서']],
+      seg<AvatarSet | 'mix'>([...RANDOM_SETS.map((s) => [s.id, s.label] as [AvatarSet, string]), ['mix', '섞어서']],
         () => draft.avatarSet, (v) => { draft.avatarSet = v; reassignAvatars(); }),
       genBtn, pickWrap, toggle('진행자', () => draft.moderator, (v) => { draft.moderator = v; }), countNote),
     bulkBar, castGrid));
