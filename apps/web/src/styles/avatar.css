@@ -26,7 +26,7 @@
 .av .shell { fill: var(--c-dim); stroke: var(--cs); stroke-width: 2.2; }
 
 :root[data-theme="light"] .av { --cs: color-mix(in oklab, var(--c) 68%, #3A2A10); }
-:root[data-theme="light"] .av-badge { color: color-mix(in oklab, var(--aura) 55%, #2B2216); border-color: color-mix(in oklab, var(--aura) 70%, #2B2216); }
+:root[data-theme="light"] .av-badge { background: color-mix(in oklab, var(--aura) 80%, #2B2216); border-color: var(--panel, #FFFFFF); color: #FFFFFF; box-shadow: 0 2px 5px rgb(0 0 0 / .25); }
 
 /* ---- 공통: 몸 전체의 움직임 (감정) ---- */
 .av-body, .crest-icon {
@@ -96,14 +96,17 @@
 .av[data-state="searching"] .av-aura { opacity: .5; animation: av-aura 2s ease-in-out infinite; }
 @keyframes av-aura { 0%, 100% { transform: scale(.94); opacity: .65; } 50% { transform: scale(1.08); opacity: 1; } }
 
+/* 감정 배지: 감정 색으로 채우고 아이콘은 짙고 굵게 그린다. 어두운 바탕에 가는 선만 있을 때는 잘 보이지 않았다.
+   바깥의 짙은 테두리가 아바타의 틀과 배지를 갈라 준다 */
 .av-badge {
-  position: absolute; top: -7%; right: -7%; width: 34%; height: 34%; min-width: 20px; min-height: 20px;
+  position: absolute; top: -9%; right: -9%; width: 38%; height: 38%; min-width: 22px; min-height: 22px;
   display: grid; place-items: center; border-radius: 50%;
-  background: var(--panel, #14100B); border: 1px solid var(--aura); color: var(--aura);
+  background: color-mix(in oklab, var(--aura) 88%, #FFFFFF); border: 2px solid var(--panel, #14100B); color: #17120B;
+  box-shadow: 0 2px 6px rgb(0 0 0 / .45);
   transform: scale(0); transition: transform .28s cubic-bezier(.3, 1.6, .5, 1);
 }
 .av-badge.is-on { transform: scale(1); }
-.av-badge svg { width: 60%; height: 60%; }
+.av-badge svg { width: 68%; height: 68%; stroke-width: 2.6; }
 .av[data-state="searching"] .av-badge svg { animation: av-search 1.1s ease-in-out infinite; }
 @keyframes av-search { 0%, 100% { transform: translate(-8%, -8%); } 50% { transform: translate(8%, 8%); } }
 
