@@ -62,6 +62,53 @@ class Turn:
     scripted: bool = False
 
 
+HANGUL = re.compile(r"[가-힣]")
+
+
+class LeadFilter:
+    """발언 앞에 붙어 나오는 계획 메모를 걸러 낸다.
+
+    생각 칸을 쓰지 않는 모델은 한국어 발언 앞에 "Opening statement, 2-4 sentences, Korean…" 같은 영어 메모를
+    글로 적을 때가 있다. 한글이 한 글자도 없는 앞쪽 줄은 발언이 아니라고 보고 내보내지 않는다.
+    한글이 나오는 줄부터는 받는 대로 흘려보낸다. 끝까지 한글이 없으면 그 글이 곧 발언이므로 통째로 내보낸다.
+    """
+
+    def __init__(self) -> None:
+        self.buf = ""
+        self.open = False
+        self.dropped = ""
+
+    def feed(self, piece: str) -> str:
+        if self.open:
+            return piece
+        self.buf += piece
+        while True:
+            line, sep, rest = self.buf.partition("\n")
+            if HANGUL.search(line):
+                self.open = True
+                out, self.buf = self.buf, ""
+                return out
+            if not sep:
+                return ""
+            if line.strip():
+                self.dropped += line + "\n"
+            self.buf = rest
+
+    def finish(self) -> str:
+        if self.open:
+            return ""
+        self.open = True
+        out, self.buf, self.dropped = self.dropped + self.buf, "", ""
+        return out
+
+
+def strip_lead(text: str) -> tuple[str, str]:
+    """(걸러 낸 메모, 발언) 한 쌍으로 나눈다."""
+    f = LeadFilter()
+    body = f.feed(text) + f.finish()
+    return f.dropped.strip(), body
+
+
 class Gen:
     """만들어지고 있는 발언 하나."""
 
@@ -113,6 +160,7 @@ class Debate:
         self.last_spoke: dict[str, int] = {}
         self.last_speaker: Optional[dict] = None
         self.last_interject = -99
+        self.heat = 0   # 날 선 발언이 몇 번 이어졌는지
         self.last_mod = -99
         self.milestones: set[str] = set()
         self.rr = 0
@@ -571,9 +619,11 @@ class Debate:
         gen = Gen(turn)
         speaker = turn.speaker
 
+        sieve = LeadFilter() if self.cfg.get("language") != "en" else None
+
         def on_event(kind: str, payload: Any) -> None:
             if kind == "text":
-                gen.text += payload
+                gen.text += sieve.feed(payload) if sieve else payload
             elif kind == "search":
                 gen.searches.append(str(payload))
             gen.changed.set()
@@ -591,6 +641,11 @@ class Debate:
                 if not speech.text.strip():
                     raise ProviderError("모델이 빈 발언을 돌려주었습니다.")
                 self._note_latency("speech", time.monotonic() - started)
+                if sieve:
+                    gen.text += sieve.finish()
+                    notes, speech.text = strip_lead(speech.text)
+                    if notes:   # 발언 앞의 메모는 발언이 아니라 생각이다
+                        speech.thinking = f"{speech.thinking.strip()}\n\n{notes}".strip()
                 # 화면에 이미 나간 글자와 자리가 어긋나지 않게 맞춘다
                 raw = gen.text
                 lead = len(raw) - len(raw.lstrip())
@@ -904,10 +959,15 @@ class Debate:
             return Turn(self.mod, "moderate",
                         f"진행자가 나설 때입니다. 상황: {reason} 논점을 한 문장으로 정리하고, 토론이 앞으로 나아가게 "
                         "구체적인 질문을 던지거나 다른 참가자에게 발언권을 넘기세요. 2~3문장.", "free")
+        # 두 사람만 주고받는 중이면(가-나-가) 이번에는 다른 사람이 끼어들기 쉽게 한다
+        recent = [s["speaker"] for s in self.speeches[-2:]] + [last["id"]]
+        duel = recent[-2] if len(recent) == 3 and recent[0] == recent[2] != recent[1] else ""
         scores: dict[str, float] = {}
         for p in self.people:
             row = by_id[p["id"]]
             score = float(row["urge"])
+            if p["id"] == duel and len(self.people) > 2:
+                score -= 3
             if p["id"] == last["id"]:
                 score -= 6                                    # 방금 말한 사람은 감점
             if verdict["addressed"] == p["id"]:
@@ -925,13 +985,14 @@ class Debate:
         if target is None and intent in ("rebut", "ask", "agree") and last["id"] not in (MOD_ID, speaker["id"]):
             target = last
         tname = f"{target['name']} 님" if target else ""
+        sharp = "날카로운" if row["mood"] in ("heated", "skeptical") else "궁금한 것을 묻는"
         lines = {
             "rebut": f"{tname}의 방금 주장에 반박하세요. 상대가 한 구체적인 말을 짚으세요." if target
                      else "지금까지 나온 주장 가운데 가장 동의하기 어려운 것에 반박하세요.",
             "add": f"{tname}의 말에 보충하거나, 다른 각도의 근거를 더하세요." if target
                    else "지금까지의 논의에 새 근거나 사례를 보충하세요.",
-            "ask": f"{tname}에게 날카로운 질문을 하나 던지세요. 왜 묻는지도 짧게 밝히세요." if target
-                   else "다른 참가자 한 명을 골라 날카로운 질문을 던지세요.",
+            "ask": f"{tname}에게 {sharp} 질문을 하나 던지세요. 왜 묻는지도 짧게 밝히세요." if target
+                   else f"다른 참가자 한 명을 골라 {sharp} 질문을 던지세요.",
             "agree": f"{tname}의 말 가운데 동의하는 부분을 밝히고, 거기에 자신의 생각을 한 걸음 더하세요." if target
                      else "앞선 발언 가운데 동의하는 부분을 밝히고 자신의 생각을 더하세요.",
             "shift": "논의가 한쪽으로 쏠렸습니다. 아직 다루지 않은 측면으로 화제를 넘기세요.",
@@ -954,8 +1015,14 @@ class Debate:
             if key != "short" and intent in ("add", "rebut") and self.style_rng.random() < prompts.FORM_CHANCE:
                 directive += " " + prompts.FORM_HINT   # 근거를 펼 만한 발언에만, 가끔
         edge = prompts.edge_hint(row["mood"], intent, self.cfg.get("tone") or "default")
-        if edge and self.style_rng.random() < prompts.EDGE_CHANCE:   # 발언마다 날을 세우면 말싸움만 남는다
-            directive += " " + edge
+        fight = row["mood"] in ("heated", "skeptical") and intent in ("rebut", "ask")
+        if fight and self.heat >= prompts.COOL_AFTER:   # 날 선 공방이 이어졌다: 이번에는 온도를 낮춘다
+            directive += " " + prompts.COOL_HINT
+            self.heat = 0
+        else:
+            self.heat = self.heat + 1 if fight else 0
+            if edge and self.style_rng.random() < prompts.EDGE_CHANCE:   # 발언마다 날을 세우면 말싸움만 남는다
+                directive += " " + edge
         return Turn(speaker, "free", directive, "free", intent=intent,
                     target=target["id"] if target else "", mood=row["mood"], interject=interject)
 

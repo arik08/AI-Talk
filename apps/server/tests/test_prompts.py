@@ -111,3 +111,15 @@ def test_mock_cast_uses_role_names_without_duplicates():
         schema=prompts.cast_schema(), model="mock-large", effort="low"))
     names = [p["name"] for p in data["personas"]]
     assert names[0] == "현장 엔지니어" and len(set(names)) == 8
+
+
+def test_warm_hints_exist_and_agree_does_not_ride_on_a_rebuttal():
+    assert prompts.edge_hint("agree", "agree", "default") == prompts.EDGE_HINT["agree"]
+    assert prompts.edge_hint("curious", "ask", "default") == prompts.EDGE_HINT["curious"]
+    assert prompts.edge_hint("agree", "rebut", "default") == ""
+    assert prompts.edge_hint("agree", "agree", "serious") == ""
+
+
+def test_speaker_is_told_not_to_write_planning_notes():
+    assert prompts.NO_NOTES in prompts.speaker_tail("가", "반박하세요.")
+    assert prompts.NO_NOTES in prompts.pgpt_directive("가", "반박하세요.")
