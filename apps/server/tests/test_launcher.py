@@ -78,9 +78,12 @@ def test_free_port_gives_up_after_waiting():
     assert tries == [4321]                                # 같은 프로세스를 되풀이해 끝내려 하지 않는다
 
 
-def test_browser_opens_only_on_the_first_start():
+def test_browser_is_not_opened_unless_asked(monkeypatch):
+    monkeypatch.setattr(la.sys, "argv", ["launch_aitalk.py"])
+    assert "--open" not in la.server_command(True)        # ai-talk.bat으로 켜도 브라우저가 뜨지 않는다
+    monkeypatch.setattr(la.sys, "argv", ["launch_aitalk.py", "--open"])
     assert la.server_command(True)[-3:] == ["-m", "aitalk", "--open"]
-    assert "--open" not in la.server_command(False)
+    assert "--open" not in la.server_command(False)       # 다시 켤 때는 열지 않는다
 
 
 class FakeProc:
@@ -121,7 +124,7 @@ def test_r_restarts_and_ctrl_c_stops():
     launcher, log, said = _launcher(FakeKeys([False, False, True, False, KeyboardInterrupt]), [first, second])
     assert launcher.run() == 0
     assert log == [("free", 8765), ("start", True), ("stop", first),
-                   ("free", 8765), ("start", False), ("stop", second)]   # 포트 정리 → 켜기, 브라우저는 처음만
+                   ("free", 8765), ("start", False), ("stop", second)]   # 포트 정리 → 켜기
     assert any("하드 리셋" in line for line in said)
 
 

@@ -181,8 +181,11 @@ def read_port() -> int:
 
 
 def server_command(first: bool) -> list[str]:
-    """브라우저는 처음 켤 때만 연다."""
-    return [sys.executable, "-m", "aitalk"] + (["--open"] if first else [])
+    """브라우저를 스스로 열지 않는다. 실행 창에 찍힌 주소를 직접 연다.
+
+    실행기에 --open을 붙여 켰을 때만, 그것도 처음 한 번만 연다.
+    """
+    return [sys.executable, "-m", "aitalk"] + (["--open"] if first and "--open" in sys.argv[1:] else [])
 
 
 def start_server(first: bool) -> subprocess.Popen:
