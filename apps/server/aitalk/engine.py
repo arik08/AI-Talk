@@ -39,9 +39,33 @@ from .providers.base import JsonFeed, Provider, ProviderError, Speech, Usage
 MOD_ID = "moderator"
 CPS = {"slow": 8.0, "normal": 14.0, "fast": 26.0}       # 화면에 나오는 속도 (초당 글자)
 GAP_SPEED = {"slow": 1.25, "normal": 1.0, "fast": 0.6, "instant": 0.0}
-SPEECH_CPS = 5.5                                         # 토론 시계용: 사람이 말하는 속도
+CLOCK_CPS = 15.0       # 토론 시계 어림용: 보통 속도에서 쉼까지 쳐서 1초에 나오는 글자 수 (아직 안 나온 글의 길이를 잴 때)
+CLOSING_SECONDS = 9    # 마무리 발언 하나에 남겨 두는 토론 시계
 GAPS = {"interject": 0.15, "rebut": 0.6, "ask": 0.9, "add": 1.1, "agree": 1.0, "shift": 1.6,
         "moderate": 1.4, "statement": 1.2, "open": 0.6, "closing": 1.3, "wrap": 1.5, "answer": 0.8}
+
+
+def unit_delay(unit: str, cps: float) -> float:
+    """낱말 하나를 화면에 내보낸 뒤 쉬는 시간. 쉼표와 문장 끝에서는 조금 더 쉰다."""
+    delay = max(len(unit.strip()), 1) / cps
+    tail = unit.rstrip()[-1:] if unit.strip() else ""
+    factor = 14.0 / cps
+    if tail in ",，、":
+        delay += 0.16 * factor
+    elif tail in ".?!…。":
+        delay += 0.36 * factor
+    return delay
+
+
+def screen_seconds(text: str) -> float:
+    """토론 시계의 단위: 이 글이 보통 속도로 화면에 다 나오는 데 걸리는 시간.
+
+    보통 속도로 보면 시계가 실제 시간과 같이 간다. 빠르게·즉시로 보면 그만큼 시계가 빨리 간다.
+    모델의 응답 속도와는 상관없이 글만으로 정해지므로, 어느 속도로 보든 같은 토론은 같은 길이다.
+    """
+    return sum(unit_delay(word, CPS["normal"]) for word in text.split())
+
+
 AWAY_SECONDS = 12      # 보는 사람이 없어진 뒤 이만큼 지나면 토론을 멈춘다
 REACT_AT = 0.3         # 앞 발언이 이만큼 화면에 나왔을 때 연출자를 부른다
 RETRY_WAITS = (2.0, 6.0)   # AI 호출이 실패했을 때 스스로 다시 시도하기 전에 기다리는 시간(초). 이 횟수만큼만 한다
@@ -496,7 +520,7 @@ class Debate:
         if self.cfg.get("max_turns"):
             parts.append(self.turn_no / self.cfg["max_turns"])
         if self.cfg.get("max_minutes"):
-            parts.append((self.clock + extra_chars / SPEECH_CPS) / (self.cfg["max_minutes"] * 60))
+            parts.append((self.clock + extra_chars / CLOCK_CPS) / (self.cfg["max_minutes"] * 60))
         return max(parts)
 
     def _should_close(self, extra_chars: int) -> bool:
@@ -506,8 +530,8 @@ class Debate:
         if self.cfg.get("max_turns") and self.turn_no + reserve >= self.cfg["max_turns"]:
             return True
         if self.cfg.get("max_minutes"):
-            now = self.clock + extra_chars / SPEECH_CPS
-            if now + reserve * 22 >= self.cfg["max_minutes"] * 60:
+            now = self.clock + extra_chars / CLOCK_CPS
+            if now + reserve * CLOSING_SECONDS >= self.cfg["max_minutes"] * 60:
                 return True
         return False
 
@@ -680,21 +704,16 @@ class Debate:
                   by={k: v.to_dict() for k, v in self.usage_by.items()}, calls=dict(self.calls))
 
     # ------------------------------------------------------------------ 보여 주기
-    def _gap(self, turn: Turn) -> float:
-        scale = float(self.cfg.get("gap_scale", 1.0)) * GAP_SPEED.get(self.speed, 1.0)
+    def _gap_base(self, turn: Turn) -> float:
+        """보통 속도에서 이 발언 앞에 두는 뜸."""
         key = "interject" if turn.interject else (turn.intent if turn.kind == "free" else turn.kind)
-        return GAPS.get(key, 1.0) * scale * self.rng.uniform(0.75, 1.25)
+        return GAPS.get(key, 1.0) * float(self.cfg.get("gap_scale", 1.0))
+
+    def _gap(self, turn: Turn) -> float:
+        return self._gap_base(turn) * GAP_SPEED.get(self.speed, 1.0) * self.rng.uniform(0.75, 1.25)
 
     def _unit_delay(self, unit: str) -> float:
-        cps = CPS.get(self.speed, 14.0)
-        delay = max(len(unit.strip()), 1) / cps
-        tail = unit.rstrip()[-1:] if unit.strip() else ""
-        factor = 14.0 / cps
-        if tail in ",，、":
-            delay += 0.16 * factor
-        elif tail in ".?!…。":
-            delay += 0.36 * factor
-        return delay
+        return unit_delay(unit, CPS.get(self.speed, 14.0))
 
     async def _present(self, gen: Gen) -> None:
         turn, speaker = gen.turn, gen.turn.speaker
@@ -761,7 +780,7 @@ class Debate:
         shown = gen.text[: self._pos].rstrip()
         final = shown + " —" if cut else shown
         speech = gen.speech or Speech()
-        seconds = len(shown) / SPEECH_CPS + GAPS.get(turn.kind, 1.0)
+        seconds = screen_seconds(shown) + self._gap_base(turn)
         started_at = round(self.clock)   # 이 발언이 시작된 토론 시계. 회의록의 시간대별 정리에 쓴다
         self.clock += seconds
         self.last_spoke[speaker["id"]] = sid

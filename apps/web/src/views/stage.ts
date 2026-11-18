@@ -15,6 +15,7 @@ import { drawSpeech, renderSpeech, speechBlocks, speechLength } from '../ui/spee
 interface Seat { persona: Persona; tile: HTMLElement; av: HTMLElement; urge: HTMLElement; status: HTMLElement; badge: HTMLElement }
 interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; av: HTMLElement; speaker: string; cut: boolean; started: boolean; raw: string; times: number[] }
 const REVEAL_CPS = 90;   // 쓰이는 중인 회의록·판정의 글자가 나타나는 빠르기 (초당 글자 수)
+const REVEAL_LAG_MS = 1200;   // 받은 글이 이보다 오래 밀리지 않게, 밀리면 더 빨리 내보낸다
 
 /**
  * 쓰이는 중인 카드(회의록, 판정)의 새 글자를 발언처럼 왼쪽부터 차례로 나타나게 한다.
@@ -34,9 +35,14 @@ export function reveal(root: HTMLElement, times: number[]): void {
   if (total < times.length) times.length = total;
   const fresh = total - times.length;
   if (fresh > 0) {
-    const step = Math.min(1000 / REVEAL_CPS, 900 / fresh);
-    const start = Math.min(Math.max(now, (times[times.length - 1] ?? 0) + step), now + 1200);   // 너무 밀리면 따라잡는다
-    for (let k = 0; k < fresh; k += 1) times.push(start + k * step);
+    // 글은 한 곳에서만 나온다. 아직 나타나기 전인 글자와 새 글자를 한 줄로 다시 세우고,
+    // 밀려 있으면 뒤쪽을 따로 먼저 내보내지 않고 줄 전체의 빠르기를 올려 따라잡는다
+    let from = times.length;
+    while (from > 0 && times[from - 1] > now) from -= 1;
+    const waiting = total - from;
+    const step = Math.min(1000 / REVEAL_CPS, REVEAL_LAG_MS / waiting);
+    times.length = from;
+    for (let k = 0; k < waiting; k += 1) times.push(now + k * step);
   }
   let index = 0;
   for (const node of nodes) {
@@ -63,7 +69,17 @@ function infoTip(text: string): HTMLElement {
 
 const SPEEDS: [string, string][] = [['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']];
 const CPS: Record<string, number> = { slow: 8, normal: 14, fast: 26 };   // 서버가 글자를 내보내는 속도와 같다
-const SPEECH_CPS = 5.5;   // 토론 시계: 사람이 말하는 속도(초당 글자). 서버의 값과 같다
+
+/** 토론 시계의 단위: 글이 보통 속도로 화면에 다 나오는 데 걸리는 시간. 서버의 screen_seconds와 같은 계산이다. */
+function screenSeconds(text: string): number {
+  let total = 0;
+  for (const word of text.split(/\s+/)) {
+    if (!word) continue;
+    const tail = word[word.length - 1];
+    total += Array.from(word).length / CPS.normal + (',，、'.includes(tail) ? 0.16 : '.?!…。'.includes(tail) ? 0.36 : 0);
+  }
+  return total;
+}
 const QUESTIONS = ['누가 가장 설득력 있었나요?', '가장 크게 갈린 쟁점은 무엇이었나요?', '빠진 관점이 있다면 무엇인가요?'];
 
 /** 타임라인의 한 칸: 발언 하나가 차지하는 구간(진행률 %)과, 그 발언이 시작되는 이벤트의 자리. */
@@ -92,7 +108,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   let qaEl: HTMLElement | null = null;
   let liveCard: Card | null = null;   // 지금 글자가 나오고 있는 발언
   let marks: Mark[] = [];
-  // 토론 시계: 서버는 발언이 끝날 때만 알려 준다. 그 사이에는 화면에 나온 글자 수로 어림해 1초씩 올린다
+  // 토론 시계: 서버는 발언이 끝날 때만 알려 준다. 그 사이에는 화면에 나온 글로 어림해 1초씩 올린다.
+  // 보통 속도로 화면에 나오는 시간을 재므로, 보통 속도에서는 실제 시간과 같이 간다
   const clock = { base: 0, shown: 0, max: null as number | null };
   let minutesEl: HTMLElement | null = null;
   let minutesTimes: number[] = [];   // 쓰이는 중인 회의록·판정의 글자가 나타날 시각 (reveal)
@@ -135,7 +152,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     h('header', { class: 'stage-head' }, phaseChip, topic,
       h('div', { class: 'clock' },
         h('span', { tip: '진행한 턴' }, icon(ListOrdered, 16), clockTurn),
-        h('span', { tip: '토론 시계: 실제로 말했다면 걸렸을 시간' }, icon(Hourglass, 16), clockTime),
+        h('span', { tip: '토론 시계: 보통 속도로 볼 때 걸리는 시간' }, icon(Hourglass, 16), clockTime),
         h('span', { tip: '지금까지 든 예상 비용: 토큰 요금 + 웹 검색 요금' }, icon(Coins, 16), clockCost), sideBtn)),
     h('div', { class: 'stage-body' }, transcript, side, cast),
     h('footer', { class: 'dock' }, timeline, controls));
@@ -203,7 +220,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     paintClock();
   }
   const clockTimer = window.setInterval(() => {
-    const said = liveCard ? Array.from(liveCard.raw).length / SPEECH_CPS : 0;   // 지금 발언에서 이미 말한 만큼
+    const said = liveCard ? screenSeconds(liveCard.raw) : 0;   // 지금 발언에서 이미 말한 만큼
     if (clock.shown + 1 > clock.base + said) return;
     clock.shown = Math.floor(clock.shown) + 1;
     paintClock();

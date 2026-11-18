@@ -684,7 +684,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       field('진행 방식', seg([['mixed', '혼합'], ['free', '자유'], ['sequential', '순차']], () => draft.mode, (v) => { draft.mode = v; }),
         '혼합: 모두발언은 차례대로, 그 뒤는 말하고 싶은 사람이'),
       field('턴 수 제한', turnsRow, '슬라이더는 100턴까지, 숫자로는 200턴까지 적을 수 있습니다'),
-      field('시간 제한', minutesRow, '실제로 말했다면 걸렸을 시간으로 잽니다. 둘 중 먼저 닿는 쪽에서 마무리합니다'),
+      field('시간 제한', minutesRow, '보통 속도로 볼 때 걸리는 시간으로 잽니다. 둘 중 먼저 닿는 쪽에서 마무리합니다'),
       field('분위기', seg([['default', '기본'], ['humorous', '유머러스'], ['serious', '진지함'], ['creative', '창의적']], () => draft.tone, (v) => { draft.tone = v; }),
         '기본: 분위기에 대한 지시 없이 그대로 진행합니다'),
       field('발언 길이', seg([['auto', '자동'], ['short', '짧게'], ['normal', '보통'], ['long', '길게']], () => draft.length, (v) => { draft.length = v; }),
