@@ -2,12 +2,13 @@ import {
   ChevronRight, ClipboardPaste, Drama, FileText, Globe, Library, RotateCcw, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Square, SquareCheck, Upload, Users,
 } from 'lucide';
 import { api } from '../api';
+import { spreadColors } from '../colors';
 import { AVATAR_SETS, RANDOM_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { PALETTE, type AvatarSet, type Mood, type Persona } from '../types';
 import { clear, deleteButton, fmtUsd, h, icon, put, safeColor, toast } from '../ui/dom';
 
-interface Slot extends Persona { fromLibrary?: boolean }
+interface Slot extends Persona { fromLibrary?: boolean; ownColor?: string }   // ownColor: 앞사람과 겹쳐 색을 바꾸기 전의 자기 색
 interface Material { name: string; text: string; chars: number; tokens: number }
 
 const draft = {
@@ -321,7 +322,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         const p = personas[i];
         if (!p) return null;
         const slot = dress(p, i, picks[i]);
-        if (i < kept.length) { slot.fromLibrary = true; slot.color = kept[i].color; slot.avatar = kept[i].avatar; }
+        if (i < kept.length) { slot.fromLibrary = true; slot.color = kept[i].ownColor ?? kept[i].color; slot.avatar = kept[i].avatar; }
         return slot;
       });
       return true;
@@ -382,7 +383,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       const fresh = personas[others.length];
       if (fresh) {
         const old = draft.cast[index];
-        draft.cast[index] = dress({ ...fresh, color: old?.color ?? PALETTE[index % PALETTE.length] }, index, old?.avatar);
+        draft.cast[index] = dress({ ...fresh, color: old?.ownColor ?? old?.color ?? PALETTE[index % PALETTE.length] }, index, old?.avatar);
       }
     } catch (err) {
       toast((err as Error).message, 'error');
@@ -550,7 +551,14 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         : `지금 전원이 ${shortModel(draft.model)} · ${draft.effort}입니다. 한 모델로 통일하면 캐시 할인이 가장 큽니다`));
   }
 
+  /** 앞사람과 색이 겹치거나 비슷한 사람은 보이는 색만 바꾼다. 자기 색은 기억해 두어, 겹침이 풀리면 돌아온다. */
+  function tintCast(): void {
+    const own = draft.cast.map((p) => (p ? (p.ownColor ??= p.color) : null));
+    spreadColors(own, PALETTE).forEach((color, i) => { if (color) draft.cast[i]!.color = color; });
+  }
+
   function paintCast(): void {
+    tintCast();
     countLabel.textContent = `${draft.count}명`;
     minus.disabled = draft.count <= 2;
     plus.disabled = draft.count >= 10;
@@ -609,8 +617,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
           libBtn,
           h('button', { type: 'button', class: 'btn btn--icon', tip: '보관함에 저장', 'aria-label': '보관함에 저장', onclick: async () => {
             try {
-              const { fromLibrary: _f, model: _m, effort: _e, ...rest } = p;
-              const saved = await api.savePersona(rest as Persona);
+              const { fromLibrary: _f, model: _m, effort: _e, ownColor, ...rest } = p;
+              const saved = await api.savePersona({ ...rest, color: ownColor ?? rest.color } as Persona);   // 보관함에는 자기 색으로
               p.id = saved.id;
               library = await api.personas();
               toast(`${p.name} 님을 보관함에 저장했습니다.`);
@@ -737,7 +745,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       const { id } = await api.startDebate({
         topic: draft.topic, concept: draft.concept, tone: draft.tone, materials: draft.materials.map((m) => ({ name: m.name, text: m.text })), urls: draft.urls,
         participants: draft.cast.map((p, i) => {
-          const { fromLibrary: _f, ...rest } = p!;
+          const { fromLibrary: _f, ownColor: _o, ...rest } = p!;   // 토론에는 겹치지 않게 바꾼 색이 간다
           return { ...rest, id: `s${i + 1}`, model: draft.perSpeaker ? rest.model : undefined, effort: draft.perSpeaker ? rest.effort : undefined };
         }),
         moderator: draft.moderator, mode: draft.mode,
