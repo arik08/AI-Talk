@@ -5,7 +5,7 @@ import { api } from '../api';
 import { AVATAR_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { PALETTE, type AvatarSet, type Mood, type Persona } from '../types';
-import { clear, deleteButton, fmtCost, h, icon, put, safeColor, toast } from '../ui/dom';
+import { clear, deleteButton, fmtUsd, h, icon, put, safeColor, toast } from '../ui/dom';
 
 interface Slot extends Persona { fromLibrary?: boolean }
 interface Material { name: string; text: string; chars: number; tokens: number }
@@ -357,7 +357,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     const own = draft.cast.filter((p) => p && (p.model || p.effort)).length;
     const same = bulk.model === draft.model && bulk.effort === draft.effort && own === 0;
     const model = h('select', { class: 'select', 'aria-label': '전원에게 적용할 모델', onchange: () => { bulk.model = model.value; paintBulk(); } },
-      models.map((m) => h('option', { value: m.id, selected: bulk.model === m.id }, m.price ? `${m.label} · 입력 ${fmtCost(m.price.in)} / 출력 ${fmtCost(m.price.out)}` : m.label)));
+      models.map((m) => h('option', { value: m.id, selected: bulk.model === m.id }, m.price ? `${m.label} · 입력 ${fmtUsd(m.price.in)} / 출력 ${fmtUsd(m.price.out)}` : m.label)));
     const effort = h('select', { class: 'select', 'aria-label': '전원에게 적용할 추론 노력', onchange: () => { bulk.effort = effort.value; paintBulk(); } },
       efforts.map((e) => h('option', { value: e, selected: bulk.effort === e }, e)));
     bulkBar.replaceChildren(
@@ -470,7 +470,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     (m?.efforts ?? []).forEach((e) => effortSel.append(h('option', { value: e, selected: draft.effort === e }, e)));
   };
   const modelSel = h('select', { class: 'select', onchange: () => { draft.model = modelSel.value; paintEfforts(); bulk.model = draft.model; bulk.effort = draft.effort; if (draft.perSpeaker) paintCast(); else paintStart(); } },
-    models.map((m) => h('option', { value: m.id, selected: draft.model === m.id }, m.price ? `${m.label} · 입력 ${fmtCost(m.price.in)} / 출력 ${fmtCost(m.price.out)}` : m.label)));
+    models.map((m) => h('option', { value: m.id, selected: draft.model === m.id }, m.price ? `${m.label} · 입력 ${fmtUsd(m.price.in)} / 출력 ${fmtUsd(m.price.out)}` : m.label)));
   paintEfforts();
   const searches = h('input', { class: 'input', type: 'number', min: 1, max: 5, value: draft.maxSearches, onchange: () => { draft.maxSearches = Math.max(1, Math.min(5, Number(searches.value) || 2)); persist(); } });
   const gap = h('input', { type: 'range', min: 0, max: 2, step: 0.25, value: draft.gapScale, class: 'range', oninput: () => { draft.gapScale = Number(gap.value); gap.style.setProperty('--p', `${draft.gapScale * 50}%`); gapNote.textContent = draft.gapScale === 0 ? '뜸 없음' : `${draft.gapScale}배`; persist(); } });

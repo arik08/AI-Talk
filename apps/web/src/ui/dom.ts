@@ -178,6 +178,12 @@ export function fmtCost(usd: number, rate = USD_KRW): string {
   return `${Math.round(won).toLocaleString()}원`;
 }
 
+/** 모델 단가(100만 토큰당)는 공개 요금표 그대로 달러로 적는다. 비용은 fmtCost로 원화. 예: $0.1, $2.5, $10 */
+export function fmtUsd(usd: number): string {
+  const value = Math.max(0, usd || 0);
+  return `$${value.toLocaleString('en-US', { maximumFractionDigits: 3 })}`;
+}
+
 export function safeColor(value: string | undefined, fallback = '#E8C170'): string {
   return value && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
 }
