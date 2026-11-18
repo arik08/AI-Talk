@@ -8,7 +8,7 @@ import { createAvatar, setAvatar } from '../avatar/avatar';
 import { copyText, recordToMarkdown } from '../export';
 import type { AppContext } from '../main';
 import { INTENT_LABEL, MOOD_LABEL, TONE_LABEL, type DebateEvent, type DebateRecord, type Mood, type Persona } from '../types';
-import { clear, fmtCost, fmtTime, h, icon, put, safeColor, toast, USD_KRW } from '../ui/dom';
+import { richTip, clear, fmtCost, fmtTime, h, icon, put, safeColor, toast, USD_KRW } from '../ui/dom';
 import { renderCited, sourceList, sourceToggle } from '../ui/sources';
 import { drawSpeech, renderSpeech, speechBlocks, speechLength } from '../ui/speech';
 
@@ -242,11 +242,21 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       const about = [[p.name, p.title].filter(Boolean).join(' · '),
         ...([['분야', p.expertise], ['입장', p.viewpoint], ['성격', p.personality], ['말투', p.speech]] as const)
           .filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`)].join('\n');
-      const tile = h('div', { class: 'tile', style: `--c:${color}`, tip: about, 'data-tip-side': 'left' }, av,
+      const tile = h('div', { class: 'tile', style: `--c:${color}`, 'data-tip-side': 'left' }, av,
         h('div', { class: 'tile-info' },
           h('div', { class: 'tile-name' }, p.name), h('div', { class: 'tile-sub' }, p.title),
           p.id === 'moderator' ? null : h('div', { class: 'urge', tip: '지금 말하고 싶은 정도' }, urge),
           h('div', { class: 'tile-foot' }, status, badge)));
+      richTip(tile, about, () => {
+        const face = createAvatar(p.avatar, color, 48);
+        face.classList.add('is-still');
+        const rows = ([['분야', p.expertise], ['성격', p.personality], ['말투', p.speech]] as const).filter(([, v]) => v);
+        return h('div', { class: 'who', style: `--c:${color}` },
+          h('div', { class: 'who-head' }, face,
+            h('div', null, h('div', { class: 'who-name' }, p.name), p.title ? h('div', { class: 'who-title' }, p.title) : null)),
+          p.viewpoint ? h('p', { class: 'who-view' }, p.viewpoint) : null,
+          rows.length ? h('dl', { class: 'who-rows' }, rows.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)])) : null);
+      });
       cast.append(tile);
       seats.set(p.id!, { persona: p, tile, av, urge, status, badge });
     };

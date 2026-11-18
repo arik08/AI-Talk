@@ -45,7 +45,15 @@ export function clear(el: Element): void {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
 
-/* ---------- 툴팁: 마우스를 1초 이상 올려 두었을 때만 뜬다 ---------- */
+/* ---------- 툴팁: 마우스를 0.5초 이상 올려 두었을 때만 뜬다 ---------- */
+const TIP_DELAY = 500;
+// 글 한 줄이 아니라 꾸민 카드를 띄우는 대상. 뜰 때마다 새로 그린다
+const richTips = new WeakMap<HTMLElement, () => Node>();
+/** 툴팁으로 카드를 띄운다. text는 같은 내용의 글(읽어 주는 도구와 대비용)이다. */
+export function richTip(el: HTMLElement, text: string, build: () => Node): void {
+  el.dataset.tip = text;
+  richTips.set(el, build);
+}
 let tipEl: HTMLElement | null = null;
 let tipTimer = 0;
 let tipTarget: HTMLElement | null = null;
@@ -63,7 +71,9 @@ function showTip(target: HTMLElement): void {
     tipEl = h('div', { class: 'tip', role: 'tooltip' });
     document.body.append(tipEl);
   }
-  tipEl.textContent = text;
+  const build = richTips.get(target);
+  tipEl.className = build ? 'tip tip--card' : 'tip';
+  tipEl.replaceChildren(build ? build() : text);
   const rect = target.getBoundingClientRect();
   tipEl.classList.add('is-on');
   const box = tipEl.getBoundingClientRect();
@@ -86,7 +96,7 @@ export function installTooltips(): void {
     hideTip();
     if (!target) return;
     tipTarget = target;
-    tipTimer = window.setTimeout(() => showTip(target), 1000);
+    tipTimer = window.setTimeout(() => showTip(target), TIP_DELAY);
   });
   document.addEventListener('mousedown', hideTip, true);
   document.addEventListener('keydown', hideTip, true);
