@@ -55,8 +55,6 @@ _WRAP = [
     "오늘 토론을 정리하겠습니다. 문제가 있다는 데는 모두 동의하셨고, 해법의 속도와 비용 부담에서 끝까지 생각이 갈렸습니다. 함께해 주신 분들께 감사드립니다.",
 ]
 
-_FIRST = ["김", "이", "박", "최", "정", "강", "조", "윤", "장", "임"]
-_GIVEN = ["서연", "도윤", "하준", "지우", "민서", "예준", "수아", "건우", "채원", "태윤"]
 _ROLES = [
     ("현장 엔지니어", "20년 차 설비 엔지니어", "원칙을 중시하고 단호함", "짧게 끊어 말함"),
     ("경제학 교수", "산업 정책을 연구하는 교수", "신중하고 숫자를 좋아함", "'데이터를 보면'을 자주 씀"),
@@ -103,7 +101,7 @@ class MockContext(Context):
                 return lead + "참가자 여러분도 차례로 따라 주시기 바랍니다."
             rest = re.sub(r'먼저, 주최자의 지시가 .*?이어서 아래 일을 합니다\.', "", directive).strip()
             return lead + (self._text(speaker, rest) if rest and "주최자" not in rest else claim)
-        target_m = re.search(r"([가-힣A-Za-z]{2,}) 님", directive)
+        target_m = re.search(r"([가-힣A-Za-z]{2,}(?: [가-힣A-Za-z0-9]+)?) 님", directive)
         target = target_m.group(1) if target_m else "앞서 말씀하신 분"
         others = [n for n in self.people if n not in (speaker, "진행자")]
         if speaker == "진행자":
@@ -240,13 +238,15 @@ class MockProvider(Provider):
             views = ["지금 당장 바꿔야 한다", "서두르면 더 큰 비용을 치른다", "방향은 맞지만 방법이 틀렸다",
                      "현장을 모르는 논의다", "숫자로 검증된 것만 믿는다", "약자의 관점이 빠졌다"]
             people = []
-            names = [a + b for a, b in zip(self.rng.sample(_FIRST, 10), self.rng.sample(_GIVEN, 10))]
             for i in range(count):
                 if i < len(fixed):
                     name, title, exp, pers, speech = fixed[i]
                 else:
                     role = _ROLES[i % len(_ROLES)]
-                    name, title, exp, pers, speech = names[i], role[1], role[0], role[2], role[3]
+                    # 이름은 사람 이름이 아니라 어떤 인물인지 드러나는 호칭이다. 역할이 되풀이되면 번호로 구분한다
+                    round_no = i // len(_ROLES)
+                    name = role[0] + (f" {round_no + 1}" if round_no else "")
+                    title, exp, pers, speech = role[1], role[0], role[2], role[3]
                 view = views[i % len(views)]
                 people.append({
                     "name": name, "title": title, "expertise": exp, "personality": pers, "speech": speech,

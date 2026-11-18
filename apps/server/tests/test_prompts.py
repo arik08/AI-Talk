@@ -64,3 +64,21 @@ def test_timeline_times_come_from_turn_numbers():
     assert out[0]["time"] == "00:00~01:30" and out[0]["turns"] == "#1~#3"
     assert out[1]["time"] == "01:30~04:10"            # 앞 구간의 끝에서 시작해 토론의 끝까지
     assert out[2]["time"] == "그대로"                 # 턴 번호를 못 읽으면 건드리지 않는다
+
+
+def test_cast_asks_for_names_that_show_who_the_person_is():
+    system = prompts.CAST_SYSTEM
+    assert "사람 이름이 아니라" in system and "웹툰 작가" in system and "10자 이내" in system
+    assert "한국 이름을 씁니다" not in system
+    assert "사람 이름이 아님" in prompts.cast_prompt("AI 저작권", 3, "auto", [], "")
+    assert prompts.DRAFT_SYSTEM.startswith(system)      # 한 줄 설명으로 만드는 초안도 같은 규칙을 따른다
+
+
+def test_mock_cast_uses_role_names_without_duplicates():
+    import asyncio
+    from aitalk.providers.mock import MockProvider
+    data, _ = asyncio.run(MockProvider(latency=0, seed=1).generate_json(
+        system=prompts.CAST_SYSTEM, prompt=prompts.cast_prompt("시험 주제", 8, "auto", [], ""),
+        schema=prompts.cast_schema(), model="mock-large", effort="low"))
+    names = [p["name"] for p in data["personas"]]
+    assert names[0] == "현장 엔지니어" and len(set(names)) == 8
