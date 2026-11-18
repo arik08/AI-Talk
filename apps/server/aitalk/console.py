@@ -53,7 +53,8 @@ def setup(title: str = "AI-Talk") -> None:
 
 
 def banner(*, provider: str, model: str, ready: bool, port: int, addresses: list[str],
-           shared: bool, code: bool) -> None:
+           shared: bool, code: bool, launcher: bool = False) -> None:
+    """켤 때 보여 주는 안내. 키와 접속 코드의 값은 찍지 않는다 (있는지 없는지만)."""
     bar = bg(232, 193, 112) + rgb(26, 18, 8) + BOLD
     width = 64
     print()
@@ -82,6 +83,8 @@ def banner(*, provider: str, model: str, ready: bool, port: int, addresses: list
     else:
         row("다른 PC ", f"{MUTED}꺼져 있음 (.env의 AITALK_HOST=127.0.0.1)")
     row("끄기    ", f"{TEXT}Ctrl+C")
+    if launcher:   # ai-talk.bat(실행기)으로 켰을 때만 통한다
+        row("다시 켜기", f"{TEXT}{BOLD}R{RESET}{MUTED}  이 창에서 Enter 없이. 설정과 코드를 다시 읽습니다 (진행 중인 토론은 끊깁니다)")
     print(f"  {GOLD_LO}{'-' * (width - 4)}{RESET}")
     print()
 

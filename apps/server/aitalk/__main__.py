@@ -1,10 +1,13 @@
 """서버를 켠다: python -m aitalk [--open] [--no-build]
 
+보통은 ai-talk.bat이 scripts/launch_aitalk.py(실행기)를 통해 켠다. 실행기는 R 키로 하드 리셋을 한다.
+
 .env의 AITALK_HOST와 AITALK_PORT를 따른다. 기본은 내 PC에서만 접속되는 127.0.0.1:8765이다.
 AITALK_HOST=0.0.0.0으로 두면 같은 망의 다른 PC에서 http://내IP:포트 로 접속할 수 있다.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -48,7 +51,8 @@ def main() -> None:
     provider = providers.build(name)
     console.banner(provider=providers.LABELS[name], model=provider.default_model, ready=provider.status()["ready"],
                    port=port, addresses=lan_addresses() if shared else [], shared=shared,
-                   code=bool(settings.get("AITALK_ACCESS_CODE")))
+                   code=bool(settings.get("AITALK_ACCESS_CODE")),
+                   launcher=os.environ.get("AITALK_LAUNCHER") == "1")
     if shared:
         console.say("처음 켤 때 Windows 방화벽이 물으면 '액세스 허용'을 눌러야 다른 PC에서 들어올 수 있습니다.", console.MUTED, mark="i")
     if "--open" in sys.argv:

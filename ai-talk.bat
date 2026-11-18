@@ -7,9 +7,8 @@ if not exist .env (
   pause
   exit /b 1
 )
-pushd apps\server
-python -m aitalk --open
+rem 실행기가 서버를 따로 켜고 이 창의 키를 읽는다: R = 하드 리셋, Ctrl+C = 끝내기
+python scripts\launch_aitalk.py
 set CODE=%ERRORLEVEL%
-popd
 if not %CODE%==0 pause
 exit /b %CODE%
