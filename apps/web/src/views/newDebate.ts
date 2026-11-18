@@ -167,7 +167,13 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     fileInput.value = '';
   });
   /* 긴 글을 그대로 붙여 넣어 자료로 쓴다 (파일로 만들 필요 없이) */
-  const pasteInput = h('textarea', { class: 'textarea paste-input', rows: 1, placeholder: '또는 긴 글을 여기에 붙여 넣기' });
+  /* 칸이 작아 붙었는지 안 보이므로, 들어온 글자 수를 옆에 적어 준다 */
+  const pasteCount = h('span', { class: 'paste-count muted small', 'aria-live': 'polite' });
+  const paintPasteCount = () => {
+    const n = pasteInput.value.trim().length;
+    pasteCount.textContent = n ? `${n.toLocaleString()}자` : '';
+  };
+  const pasteInput = h('textarea', { class: 'textarea paste-input', rows: 1, placeholder: '또는 긴 글을 여기에 붙여 넣기', oninput: paintPasteCount });
   const addPaste = () => {
     const text = pasteInput.value.trim();
     if (!text) { pasteInput.focus(); return; }
@@ -176,6 +182,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     draft.materials.push({ name: `붙여 넣은 글: ${head}${text.length > 24 ? '…' : ''}`, text, chars: text.length,
       tokens: hangul + Math.round((text.length - hangul) / 4) });
     pasteInput.value = '';
+    paintPasteCount();
     paintMaterials();
   };
 
@@ -195,7 +202,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     h('div', { class: 'mat-row' },
       h('button', { type: 'button', class: 'btn', onclick: () => fileInput.click() }, icon(Upload, 18), '문서 올리기'), fileInput,
       urlInput, h('button', { type: 'button', class: 'btn', onclick: addUrl }, icon(Plus, 18), '주소 추가'),
-      pasteInput, h('button', { type: 'button', class: 'btn', onclick: addPaste }, icon(ClipboardPaste, 18), '글 추가')),
+      pasteInput, pasteCount, h('button', { type: 'button', class: 'btn', onclick: addPaste }, icon(ClipboardPaste, 18), '글 추가')),
     matList));
   paintMaterials();
 
