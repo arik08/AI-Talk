@@ -99,10 +99,43 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     h('footer', { class: 'dock' }, timeline, controls));
   root.append(stage);
 
+  // 맨 아래를 따라갈 때는 한 번에 뛰지 않고, 남은 거리의 일정 비율씩 다가간다 (저역 통과 필터처럼).
+  // 회의록처럼 긴 덩어리가 한꺼번에 붙어도 화면이 턱턱 끊기지 않고 미끄러지듯 내려간다
+  const GLIDE_MS = 220;        // 남은 거리가 약 37%로 줄어드는 데 걸리는 시간
+  let glide = 0;               // 돌고 있는 requestAnimationFrame
+  let glidePos = 0;            // 소수점까지 들고 있는 위치 (scrollTop은 정수로 깎일 수 있다)
+  let glideSet = -1;           // 우리가 마지막으로 넣은 scrollTop. 이것과 다르면 사용자가 움직인 것이다
+  let glideAt = 0;
+  const calm = window.matchMedia('(prefers-reduced-motion: reduce)');
   transcript.addEventListener('scroll', () => {
+    if (glide && Math.abs(transcript.scrollTop - glideSet) < 2) return;   // 우리가 움직인 것
     stick = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 120;
+    glidePos = transcript.scrollTop;
   });
-  const follow = () => { if (stick) transcript.scrollTop = transcript.scrollHeight; };
+  const glideStep = (now: number) => {
+    const goal = transcript.scrollHeight - transcript.clientHeight;
+    const gap = goal - glidePos;
+    if (!stick || gap < 0.5) {
+      if (stick) transcript.scrollTop = goal;
+      glide = 0;
+      return;
+    }
+    const dt = Math.min(now - glideAt, 100);
+    glideAt = now;
+    glidePos += Math.max(gap * (1 - Math.exp(-dt / GLIDE_MS)), Math.min(gap, 0.5));
+    transcript.scrollTop = glidePos;
+    glideSet = transcript.scrollTop;
+    glide = requestAnimationFrame(glideStep);
+  };
+  const follow = () => {
+    if (!stick) return;
+    if (calm.matches || document.hidden) { transcript.scrollTop = transcript.scrollHeight; return; }   // 안 보이는 탭은 프레임이 돌지 않는다
+    if (glide) return;
+    glidePos = transcript.scrollTop;
+    glideSet = glidePos;
+    glideAt = performance.now();
+    glide = requestAnimationFrame(glideStep);
+  };
   sideBtn.addEventListener('click', () => { side.classList.toggle('is-closed'); if (!side.classList.contains('is-closed')) paintSide(); });
 
   /* ---------- 토론 시계 ---------- */
@@ -535,7 +568,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         const res = await api.ask(id, question, (piece) => {
           text2 += piece;
           answer.textContent = text2;
-          if (stick) transcript.scrollTop = transcript.scrollHeight;
+          follow();
         });
         record.qa = res.qa;
         answer.textContent = res.qa[res.qa.length - 1]?.a ?? text2;
@@ -1074,6 +1107,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     disposed = true;
     stream?.close();
     observer.disconnect();
+    cancelAnimationFrame(glide);
     window.clearTimeout(replayTimer);
     window.clearInterval(waitTimer);
     window.clearInterval(clockTimer);
