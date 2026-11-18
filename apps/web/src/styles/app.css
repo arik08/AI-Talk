@@ -491,6 +491,10 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .fn { margin: 0 .0625rem; color: var(--gold); font-size: .8125rem; font-variant-numeric: tabular-nums; vertical-align: .25em; line-height: 1; white-space: nowrap; text-decoration: none; }
 .fn:hover, .fn:focus-visible { color: var(--gold-hi); text-decoration: underline; }
 .src-btn { display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; margin-left: .375rem; padding: 0; vertical-align: -.1em; border: 1px solid var(--line); border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer; transition: color .15s var(--ease), border-color .15s var(--ease); }
+/* 글 속의 발언 번호: 누르면 그 발언으로 간다. 글의 흐름을 끊지 않게 글자 크기는 그대로 둔다 */
+.turn-ref { padding: 0 .1875rem; border: 0; border-radius: 2px; background: rgb(var(--gold-rgb) / .1); color: var(--gold-hi); font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; transition: background .15s var(--ease); }
+.turn-ref:hover { background: rgb(var(--gold-rgb) / .24); text-decoration: underline; }
+.turn-ref:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .src-btn:hover, .src-btn.is-on { color: var(--gold-hi); border-color: var(--line-hi); }
 .src-btn:focus-visible, .fn:focus-visible, .srcs-item:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .src-panel { margin-top: .5rem; padding: .5rem .75rem; max-height: 15rem; overflow-y: auto; border-left: 2px solid var(--gold-lo); background: var(--panel); }

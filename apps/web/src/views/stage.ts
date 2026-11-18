@@ -614,6 +614,37 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     waitEl = null;
   }
 
+  /** 글 속의 발언 번호(#14)를 누르면 그 발언으로 가는 버튼으로 바꾼다. 화면에 있는 발언의 번호만 바꾼다. */
+  function linkTurns(root: HTMLElement): void {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (/#\d/.test((n as Text).data) && !(n.parentElement?.closest('.turn-ref, button, a, input'))) nodes.push(n as Text);
+    }
+    for (const node of nodes) {
+      const parts = node.data.split(/(#\d{1,3})(?!\d)/);
+      if (parts.length < 2) continue;
+      const frag = document.createDocumentFragment();
+      parts.forEach((part, k) => {
+        const no = k % 2 ? Number(part.slice(1)) : 0;
+        if (no && cards.has(no)) {
+          const who = seats.get(cards.get(no)!.speaker)?.persona.name ?? '';
+          frag.append(h('button', { type: 'button', class: 'turn-ref', 'data-turn': no, tip: `${who}의 발언으로 가기`.trim(), 'aria-label': `${part} ${who}의 발언으로 가기` }, part));
+        } else if (part) frag.append(part);
+      });
+      node.replaceWith(frag);
+    }
+  }
+  inner.addEventListener('click', (e) => {
+    const ref = (e.target as HTMLElement).closest?.('.turn-ref') as HTMLElement | null;
+    const card = ref ? cards.get(Number(ref.dataset.turn))?.root : null;
+    if (!card) return;
+    card.scrollIntoView({ block: 'center', behavior: calm.matches ? 'auto' : 'smooth' });
+    card.classList.remove('is-flash');
+    void card.offsetWidth;
+    card.classList.add('is-flash');
+  });
+
   /** 토론 아래에 붙는 카드의 차례: 회의록, 판정, 총 비용, 묻고 답하기. 새로 만든 카드를 제자리에 넣는다. */
   function placeTail(el: HTMLElement): void {
     const order = [minutesEl, verdictEl, costEl, qaEl];
@@ -652,6 +683,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
           h('span', { style: `--c:${nameColor(pt.name ?? '')}` }, pt.name ?? ''), h('span', null, pt.point ?? '')])))),
       list('합의 사항', 'agreements'), list('미결 사항', 'open_issues'), list('후속 조치', 'follow_ups'),
       has('conclusion') ? h('div', { class: 'takeaway' }, m.conclusion) : null);
+    linkTurns(minutesEl);
     if (partial || minutesTimes.length) reveal(minutesEl, minutesTimes);   // 다 쓴 순간에도 나오던 글자는 마저 흘러나온다
     if (!partial) minutesTimes = [];
     if (opts.scroll) minutesEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -689,6 +721,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       }),
       moment.why ? h('div', { class: 'takeaway' }, h('small', null, `가장 인상적인 장면 · ${moment.turn ?? ''} ${moment.name ?? ''}`), moment.why) : null,
       partial ? null : h('p', { class: 'muted small', style: 'margin-top:1rem' }, '어느 입장이 옳은지가 아니라 누가 토론을 더 잘했는지를 본 AI의 평가입니다.'));
+    linkTurns(verdictEl);
     if (partial || verdictTimes.length) reveal(verdictEl, verdictTimes);
     if (!partial) verdictTimes = [];
     if (opts.scroll) verdictEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -705,6 +738,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const write = (answer: HTMLElement, a: string, streaming = false) => {
       clear(answer);
       drawSpeech(answer, speechBlocks(parseCitations(a, notes, { streaming }), streaming));
+      linkTurns(answer);   // 답에 나온 발언 번호를 누르면 그 발언으로 간다
     };
     const item = (q: string, a: string) => {
       const answer = h('div', { class: 'qa-a sp-text' });
