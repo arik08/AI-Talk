@@ -752,8 +752,9 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       const { id } = await api.startDebate({
         topic: draft.topic, concept: draft.concept, tone: draft.tone, materials: draft.materials.map((m) => ({ name: m.name, text: m.text })), urls: draft.urls,
         participants: draft.cast.map((p, i) => {
-          const { fromLibrary: _f, ownColor: _o, ...rest } = p!;   // 토론에는 겹치지 않게 바꾼 색이 간다
-          return { ...rest, id: `s${i + 1}`, model: draft.perSpeaker ? rest.model : undefined, effort: draft.perSpeaker ? rest.effort : undefined };
+          const { fromLibrary, ownColor: _o, fav: _fav, ...rest } = p!;   // 토론에는 겹치지 않게 바꾼 색이 간다
+          // library: 보관함에서 온 인물. 보는 사람이 아는 캐릭터라, 그 사람다움이 발언에 더 드러나게 한다
+          return { ...rest, library: !!fromLibrary, id: `s${i + 1}`, model: draft.perSpeaker ? rest.model : undefined, effort: draft.perSpeaker ? rest.effort : undefined };
         }),
         moderator: draft.moderator, mode: draft.mode,
         max_turns: draft.turnsOn ? draft.maxTurns : null, max_minutes: draft.minutesOn ? draft.maxMinutes : null,

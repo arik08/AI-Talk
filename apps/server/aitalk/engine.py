@@ -657,7 +657,8 @@ class Debate:
             try:
                 await self._gate()
                 private = speaker.get("hidden", "") if self.cfg.get("hidden_agenda", True) else ""
-                hint = prompts.TONE_HINT.get(self.cfg.get("tone") or "default", "")
+                tone = self.cfg.get("tone") or "default"
+                hint = f"{prompts.TONE_HINT.get(tone, '')} {prompts.character_hint(speaker, tone)}".strip()
                 order = self._order_for(speaker)
                 speech = await self.ctx.speak(
                     speaker=speaker["name"], directive=f"{order} {turn.directive} {hint}".strip(), private=private,
