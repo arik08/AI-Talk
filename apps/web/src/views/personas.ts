@@ -22,6 +22,7 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
 
   const grid = h('div', { class: 'cast-grid' });
   const tagBar = h('div', { class: 'row' });
+  const countNote = h('span', { class: 'page-count', 'aria-live': 'polite' });   // 보관함의 인원수. 찾거나 태그로 좁혔으면 그중 몇 명인지도
   const search = h('input', { class: 'input', type: 'search', placeholder: '이름, 직함, 분야로 찾기', oninput: () => { query = search.value.trim().toLowerCase(); paint(); } });
   const fileInput = h('input', { type: 'file', class: 'hidden', accept: '.json' });
   fileInput.addEventListener('change', async () => {
@@ -40,7 +41,7 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
 
   root.append(h('div', { class: 'page' },
     h('div', { class: 'page-head' },
-      h('div', null, h('h1', null, '페르소나 보관함'), h('p', null, '여기 둔 인물은 어느 토론에나 불러 쓸 수 있습니다. 입장은 토론마다 주제에 맞춰 새로 정해집니다. 실존 인물과 역사 속 인물은 널리 알려진 생각과 말투를 본뜬 AI의 재현이며, 실제 그 사람의 발언이 아닙니다.')),
+      h('div', null, h('h1', null, '페르소나 보관함', countNote), h('p', null, '여기 둔 인물은 어느 토론에나 불러 쓸 수 있습니다. 입장은 토론마다 주제에 맞춰 새로 정해집니다. 실존 인물과 역사 속 인물은 널리 알려진 생각과 말투를 본뜬 AI의 재현이며, 실제 그 사람의 발언이 아닙니다.')),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'btn', onclick: () => fileInput.click() }, icon(Upload, 18), '가져오기'), fileInput,
         h('button', { type: 'button', class: 'btn', onclick: exportAll }, icon(Download, 18), '내보내기'),
@@ -61,6 +62,7 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
     tags.forEach((t) => tagBar.append(h('button', { type: 'button', class: `chip${tag === t ? ' is-on' : ''}`, onclick: () => { tag = tag === t ? '' : t; paint(); } }, t)));
     const shown = people.filter((p) => (!tag || (p.tags ?? []).includes(tag))
       && (!query || [p.name, p.title, p.expertise, ...(p.tags ?? [])].join(' ').toLowerCase().includes(query)));
+    countNote.textContent = shown.length === people.length ? `${people.length}명` : `${people.length}명 중 ${shown.length}명`;
     clear(grid);
     if (!shown.length) {
       grid.append(h('div', { class: 'empty', style: 'grid-column:1/-1' }, h('h3', null, people.length ? '찾는 인물이 없습니다' : '보관함이 비어 있습니다'),

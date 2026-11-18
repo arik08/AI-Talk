@@ -571,6 +571,7 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 /* ---------- 보관함, 기록, 설정 ---------- */
 .page-head { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
 .page-head h1 { font-size: 2rem; color: var(--gold-hi); }
+.page-count { margin-left: .75rem; font-family: var(--font-body); font-size: 1rem; font-weight: 400; letter-spacing: 0; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .page-head p { color: var(--muted); }
 .page-head .row { margin-left: auto; }
 .toolbar { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; }
