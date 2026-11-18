@@ -14,6 +14,12 @@
   - 그것도 앞 발언이 끝나기 직전에 맞춰 만든다. 최근 호출이 걸린 시간을 재서, 앞 발언의 남은 재생 시간이
     그만큼 남았을 때 시작한다. 연출자는 앞 발언이 30%쯤 나왔을 때 부른다(끼어들 자리를 남기려고).
   - 보는 사람이 없으면(창을 닫으면) 잠시 뒤 스스로 멈추고, 다시 열면 이어 간다.
+
+끊겨도 잃지 않는다
+  - 발언이 하나 끝날 때마다 기록을 저장한다. 서버가 꺼져도 그 발언까지는 남는다.
+  - 저장할 때 이어 가는 데 필요한 것(설정 전체, 문맥에 넣은 기록, 차례와 시계)을 함께 적어 둔다.
+    Debate.restore가 그것으로 토론을 다시 세우고, 끊긴 발언 다음부터 이어 간다.
+  - AI 호출이 실패하면 잠깐 기다렸다가 두 번까지 스스로 다시 시도하고, 그래도 안 되면 멈추고 '이어 하기'를 기다린다.
 """
 from __future__ import annotations
 
@@ -28,7 +34,7 @@ from typing import Any, Optional
 
 from . import materials, prompts, store
 from .config import settings
-from .providers.base import Provider, ProviderError, Speech, Usage
+from .providers.base import JsonFeed, Provider, ProviderError, Speech, Usage
 
 MOD_ID = "moderator"
 CPS = {"slow": 8.0, "normal": 14.0, "fast": 26.0}       # 화면에 나오는 속도 (초당 글자)
@@ -38,6 +44,7 @@ GAPS = {"interject": 0.15, "rebut": 0.6, "ask": 0.9, "add": 1.1, "agree": 1.0, "
         "moderate": 1.4, "statement": 1.2, "open": 0.6, "closing": 1.3, "wrap": 1.5, "answer": 0.8}
 AWAY_SECONDS = 12      # 보는 사람이 없어진 뒤 이만큼 지나면 토론을 멈춘다
 REACT_AT = 0.3         # 앞 발언이 이만큼 화면에 나왔을 때 연출자를 부른다
+RETRY_WAITS = (2.0, 6.0)   # AI 호출이 실패했을 때 스스로 다시 시도하기 전에 기다리는 시간(초). 이 횟수만큼만 한다
 PHASE_LABEL = {"prepare": "준비", "opening": "개회", "statements": "모두발언", "free": "자유토론",
                "closing": "마무리 발언", "wrap": "진행자 정리", "ended": "끝"}
 
@@ -138,6 +145,9 @@ class Debate:
         self._bg: set[asyncio.Task] = set()
         self._compactions_seen = 0
         self.task: Optional[asyncio.Task] = None
+        self.pace = 1.0                          # 화면 박자의 배율. 자동 시험에서 낮춰 빨리 돌린다
+        self._snap: Optional[dict] = None        # 마지막으로 끝난 발언 시점의 상태. 끊긴 토론을 이어 갈 때 쓴다
+        self._restored: Optional[dict] = None    # 저장된 기록에서 다시 세운 토론이면 그때의 상태
 
     # ------------------------------------------------------------------ 이벤트
     def _elapsed(self) -> float:
@@ -147,6 +157,12 @@ class Debate:
     def emit(self, type_: str, **data: Any) -> None:
         event = {"i": len(self.events), "t": round(self._elapsed(), 3), "type": type_, **data}
         self.events.append(event)
+        for queue in list(self.subs):
+            queue.put_nowait(event)
+
+    def emit_live(self, type_: str, **data: Any) -> None:
+        """지금 보고 있는 화면에만 보내고 기록에는 남기지 않는다 (쓰는 중인 회의록처럼 곧 덮어쓰일 것)."""
+        event = {"i": -1, "t": round(self._elapsed(), 3), "type": type_, **data}
         for queue in list(self.subs):
             queue.put_nowait(event)
 
@@ -214,7 +230,7 @@ class Debate:
             await self._gate_open.wait()
 
     async def _sleep(self, seconds: float, *, skippable: bool = True) -> None:
-        end = time.monotonic() + seconds
+        end = time.monotonic() + seconds * self.pace
         while True:
             await self._gate()
             if skippable and (self.skip or self.speed == "instant"):
@@ -227,13 +243,21 @@ class Debate:
     # ------------------------------------------------------------------ 실행
     async def run(self) -> None:
         try:
-            self.emit("init", **self.public())
+            if self._restored is None:
+                self.emit("init", **self.public())
             for model in await self.provider.list_models():
                 self.prices[model.id] = model.price
-            await self._prepare()
+            if self._restored is None:
+                await self._prepare()
+                self._save_point()
+            else:
+                self._open_context()
+                self.ctx.restore(self._restored.get("entries") or [])
+                self.emit("notice", kind="resume", text="끊겼던 토론을 이어 갑니다.")
             await self._loop()
             await self._summarize()
             self.state = "ended"
+            self._snap = None   # 끝난 토론은 이어 갈 일이 없다
         except asyncio.CancelledError:
             self.state = "aborted"
             self.emit("notice", kind="abort", text="토론을 중단했습니다.")
@@ -255,7 +279,79 @@ class Debate:
                 "usage": self.usage.to_dict(), "calls": dict(self.calls),
                 "judge_fallbacks": getattr(self.provider, "judge_fallbacks", 0), "briefing": self.briefing,
                 "speeches": self.speeches, "summary": self.summary, "minutes": self.minutes,
-                "context": self.ctx.snapshot() if self.ctx else {}, "events": self.events}
+                "context": self.ctx.snapshot() if self.ctx else {}, "events": self.events,
+                "resume": self._snap}
+
+    # ------------------------------------------------------------------ 끊겨도 이어 가기
+    @staticmethod
+    def _turn_dict(turn: Turn) -> dict:
+        return {"speaker": turn.speaker["id"], "kind": turn.kind, "directive": turn.directive, "phase": turn.phase,
+                "intent": turn.intent, "target": turn.target, "mood": turn.mood, "interject": turn.interject,
+                "scripted": turn.scripted}
+
+    def _person(self, pid: str) -> Optional[dict]:
+        if pid == MOD_ID:
+            return self.mod
+        return next((p for p in self.people if p["id"] == pid), None)
+
+    def _save_point(self, last: Optional[tuple[str, str]] = None) -> None:
+        """발언이 하나 끝난 지금의 상태를 적어 두고 기록을 저장한다. last는 방금 끝난 발언 (이름, 글)."""
+        script = [self._turn_dict(t) for t in self.script]
+        task = self._plan_task
+        if task and task.done() and not task.cancelled() and task.exception() is None:
+            ahead = task.result()   # 이미 대본에서 꺼내 만들고 있는 다음 발언. 끊기면 다시 만들어야 하므로 대본에 되돌려 적는다
+            if ahead is not None and ahead.turn.scripted:
+                script.insert(0, self._turn_dict(ahead.turn))
+        entries = [list(e) for e in getattr(self.ctx, "entries", [])]
+        if last and (not entries or entries[-1] != list(last)):
+            entries.append(list(last))   # 문맥에 넣는 일이 한 박자 늦게 돌 수 있다
+        self._snap = {
+            "cfg": self.cfg, "entries": entries, "n_events": len(self.events), "n_speeches": len(self.speeches),
+            "turn_no": self.turn_no, "clock": self.clock, "phase": self.phase, "closing": self.closing,
+            "finish": self.finish, "script": script, "last_spoke": dict(self.last_spoke),
+            "last_speaker": self.last_speaker["id"] if self.last_speaker else None,
+            "last_interject": self.last_interject, "last_mod": self.last_mod,
+            "milestones": sorted(self.milestones), "rr": self.rr, "moods": self._moods,
+            "orders": [{"text": o["text"], "todo": sorted(o["todo"])} for o in self.orders],
+            "usage": self.usage.to_dict(), "usage_by": {k: v.to_dict() for k, v in self.usage_by.items()},
+            "calls": dict(self.calls), "cost_parts": dict(self.cost_parts), "speed": self.speed,
+        }
+        try:
+            store.save_debate(self.record())
+        except Exception as exc:  # noqa: BLE001 - 저장이 안 되어도 토론은 계속한다
+            self.emit("notice", kind="warn", text=f"기록을 중간 저장하지 못했습니다. ({exc})")
+
+    @classmethod
+    def restore(cls, record: dict, provider: Provider) -> "Debate":
+        """저장된 기록으로 토론을 다시 세운다. 마지막으로 끝난 발언 다음부터 이어 간다."""
+        snap = record["resume"]
+        debate = cls(record["id"], snap["cfg"], provider)
+        debate.created = record.get("created") or debate.created
+        debate.events = list(record.get("events") or [])[: snap["n_events"]]
+        debate.speeches = list(record.get("speeches") or [])[: snap["n_speeches"]]
+        debate.briefing = record.get("briefing") or ""
+        debate.turn_no, debate.clock = int(snap["turn_no"]), float(snap["clock"])
+        debate.phase, debate.closing, debate.finish = snap["phase"], bool(snap["closing"]), bool(snap.get("finish"))
+        debate.speed = snap.get("speed") or debate.speed
+        debate.last_spoke = {k: int(v) for k, v in (snap.get("last_spoke") or {}).items()}
+        debate.last_speaker = debate._person(snap.get("last_speaker") or "")
+        debate.last_interject, debate.last_mod = int(snap["last_interject"]), int(snap["last_mod"])
+        debate.milestones, debate.rr = set(snap.get("milestones") or []), int(snap.get("rr") or 0)
+        debate._moods = snap.get("moods") or {}
+        debate.orders = [{"text": o["text"], "todo": set(o["todo"])} for o in snap.get("orders") or []]
+        for item in snap.get("script") or []:
+            speaker = debate._person(item["speaker"])
+            if speaker:
+                debate.script.append(Turn(**{**item, "speaker": speaker}))
+        debate.usage = Usage(**snap.get("usage") or {})
+        debate.usage_by = {k: Usage(**v) for k, v in (snap.get("usage_by") or {}).items()}
+        debate.calls = dict(snap.get("calls") or {})
+        debate.cost_parts = {**debate.cost_parts, **(snap.get("cost_parts") or {})}
+        debate.cost = sum(debate.cost_parts.values())
+        debate._t0 = time.monotonic() - (debate.events[-1]["t"] if debate.events else 0)
+        debate._snap = snap
+        debate._restored = snap
+        return debate
 
     async def _prepare(self) -> None:
         cfg = self.cfg
@@ -272,6 +368,10 @@ class Debate:
             self.briefing = "\n\n".join(notes)
             if self.briefing:
                 self.emit("briefing", text=self.briefing)
+        self._open_context()
+
+    def _open_context(self) -> None:
+        cfg = self.cfg
         shared = prompts.shared_context(cfg, self.briefing)
         self.ctx = self.provider.open_context(
             shared, search=cfg.get("search") in ("auto", "all"),
@@ -363,18 +463,44 @@ class Debate:
         return False
 
     # ------------------------------------------------------------------ 주 루프
-    async def _loop(self) -> None:
+    async def _first(self) -> Optional[Gen]:
+        """첫 발언. 이어 가는 토론이면 끊긴 발언 다음 차례를 정한다."""
+        if self._restored is not None and self.speeches:
+            if self.script:
+                return self._generate(self.script.popleft())
+            if self.closing:
+                return None   # 마지막 발언까지 끝난 뒤에 끊겼다. 회의록만 남았다
+            last = self.speeches[-1]
+            prev = Gen(Turn(self._person(last["speaker"]) or self.people[0], last.get("kind", "free"), "",
+                            last.get("phase", "free")))
+            prev.text = last.get("text", "")
+            prev.done.set()
+            return await self._plan(prev)
         self.closing = False
         self._build_opening()
         first = self.script.popleft() if self.script else Turn(
             self.rng.choice(self.people), "free",
             f"토론의 첫 발언입니다. 주제에 대한 생각을 밝히며 토론을 여세요. {self._len()}", "free")
-        gen: Optional[Gen] = self._generate(first)
+        return self._generate(first)
+
+    async def _loop(self) -> None:
+        gen = await self._first()
+        tries = 0
         while gen is not None:
             gen = self._apply_pending(gen)
             try:
                 await self._present(gen)
+                tries = 0
             except ProviderError as exc:
+                if exc.retry and tries < len(RETRY_WAITS):   # 잠깐의 장애는 스스로 넘긴다
+                    wait = RETRY_WAITS[tries]
+                    tries += 1
+                    self.emit("notice", kind="warn",
+                              text=f"AI 호출이 실패해 {wait:g}초 뒤에 다시 시도합니다 ({tries}/{len(RETRY_WAITS)}). ({exc})")
+                    await self._sleep(wait, skippable=False)
+                    gen = self._generate(gen.turn)
+                    continue
+                tries = 0
                 self.state = "error"
                 self._paused_at = time.monotonic()
                 self._resume.clear()
@@ -598,6 +724,7 @@ class Debate:
                   seconds=round(self.clock, 1),
                   max_seconds=(self.cfg["max_minutes"] * 60) if self.cfg.get("max_minutes") else None,
                   progress=round(min(self._progress(), 1.0), 3))
+        self._save_point((speaker["name"], final))
 
     # ------------------------------------------------------------------ 다음 정하기
     async def _after_gen(self, gen: Gen) -> Optional[Gen]:
@@ -630,7 +757,7 @@ class Debate:
         if self._shown.is_set() or self.speed == "instant" or self.skip:
             return 0.0
         limit = self._cut if self._cut is not None else len(prev.text)
-        return max(limit - self._pos, 0) / CPS.get(self.speed, 14.0) * 1.3
+        return max(limit - self._pos, 0) / CPS.get(self.speed, 14.0) * 1.3 * self.pace
 
     async def _hold_until(self, prev: Gen, *, progress: Optional[float] = None,
                           lead: Optional[float] = None) -> None:
@@ -643,7 +770,7 @@ class Debate:
                 return
             if lead is not None and self._remaining(prev) <= lead:
                 return
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(max(0.1 * self.pace, 0.002))
 
     def _lead(self) -> float:
         """다음 발언을 만들기 시작할 시점: 앞 발언의 남은 시간이 이만큼일 때."""
@@ -844,17 +971,22 @@ class Debate:
         if not self.cfg.get("summary", True) or len(self.speeches) < 3:
             return
         model, effort = self.cfg["model"], self.cfg["effort"]
+        # 쓰이는 대로 화면에 보여 준다. 기록에는 다 쓴 회의록만 남긴다
+        feed = JsonFeed(lambda part: self.emit_live(
+            "minutes_partial", minutes=prompts.stamp_timeline(part, self.speeches, self.clock)))
         try:
             self.emit("summarizing")
             try:   # 토론에 쓰던 문맥(캐시)을 그대로 이어 쓴다. 기록을 처음부터 다시 보내지 않는다
                 data, usage = await self.ctx.judge(question=prompts.minutes_tail(self.speeches),
-                                                   schema=prompts.minutes_schema(), model=model, effort=effort)
+                                                   schema=prompts.minutes_schema(), model=model, effort=effort,
+                                                   on_event=feed)
             except Exception:  # noqa: BLE001 - 안 되면 기록을 통째로 보내는 방식으로
+                feed("reset", None)
                 people = [f"{p['name']}({p.get('title', '')})" for p in self.people]
                 data, usage = await self.provider.generate_json(
                     system=prompts.MINUTES_SYSTEM,
                     prompt=prompts.minutes_prompt(self.cfg["topic"], (["진행자"] if self.mod else []) + people, self.speeches),
-                    schema=prompts.minutes_schema(), model=model, effort=effort)
+                    schema=prompts.minutes_schema(), model=model, effort=effort, on_event=feed)
             self._account("minutes", usage, model, part="minutes")
             prompts.stamp_timeline(data, self.speeches, self.clock)
             self.minutes = {**data, "model": model, "written": dt.datetime.now().isoformat(timespec="seconds")}

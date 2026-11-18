@@ -466,6 +466,8 @@ def stamp_timeline(minutes: dict, speeches: list[dict], total_seconds: float) ->
     starts = {s["id"]: s.get("at", 0) for s in speeches}
     last = max(starts) if starts else 0
     for item in minutes.get("timeline") or []:
+        if not isinstance(item, dict):
+            continue
         nums = [int(n) for n in re.findall(r"[0-9]+", str(item.get("turns", "")))]
         nums = [n for n in nums if n in starts]
         if not nums:
@@ -513,12 +515,11 @@ def minutes_schema() -> dict:
 
 def minutes_prompt(topic: str, people: list[str], speeches: list[dict]) -> str:
     """기록을 통째로 보내 회의록을 받는다 (끝난 토론을 나중에 다시 쓸 때)."""
-    lines = "\n".join(f"【#{s['id']} · {clock(s.get('at', 0))} · {s['name']}】 {s['text']}" for s in speeches)
     return f"""주제: {topic.strip()}
 참석자: {', '.join(people)}
 
 기록 (턴 번호 · 시작 시각 · 발언자):
-{lines}
+{transcript_lines(speeches)}
 
 위 기록으로 회의록을 쓰세요.
 {MINUTES_FIELDS}"""
@@ -538,3 +539,125 @@ def minutes_tail(speeches: list[dict]) -> str:
 {MINUTES_FIELDS}
 
 {MINUTES_SHAPE}"""
+
+
+def transcript_lines(speeches: list[dict]) -> str:
+    """끝난 토론의 기록. 턴 번호, 시작 시각, 발언자를 붙인다."""
+    return "\n".join(f"【#{s['id']} · {clock(s.get('at', 0))} · {s['name']}】 {s['text']}" for s in speeches)
+
+
+# ---------------------------------------------------------------- 판정
+VERDICT_SYSTEM = """당신은 토론 대회의 심사위원입니다. 끝난 토론의 기록을 읽고, 누가 토론을 더 잘했는지 판정합니다.
+
+- 어느 입장이 옳은지를 가리지 않습니다. 같은 입장이라도 누가 더 설득력 있게 토론했는지를 봅니다.
+- 보는 것: 주장이 분명한가, 근거와 사례가 구체적인가, 상대의 반박과 질문에 제대로 답했는가, 상대 주장의 약한 곳을 짚었는가, 끝까지 일관됐는가(설득력 있는 반론에 입장을 다듬은 것은 감점이 아님).
+- 기록에 실제로 나온 말만 근거로 씁니다. 근거를 댈 때는 턴 번호(#12)를 함께 적습니다.
+- 진행자는 평가하지 않습니다. 참가자 전원을 빠짐없이 평가합니다.
+- 간결한 개조식 문장으로 씁니다. 예) "~를 수치로 뒷받침함", "~라는 질문에 답하지 못함"."""
+
+VERDICT_FIELDS = """- summary: 총평. 승부가 어디서 갈렸는지 2~4문장
+- winner: 가장 설득력 있었던 참가자의 이름. 기록에 나온 이름 그대로. 우열을 가리기 어려우면 빈 문자열
+- reason: 그 사람을 꼽은 이유 (우열을 가리기 어려우면 그 이유) 1~3문장
+- ranking: 참가자 전원을 점수가 높은 순서로. 사람마다
+  - name: 이름
+  - score: 설득력 점수 (0~100의 정수)
+  - strengths: 잘한 점. 턴 번호와 함께 1~2문장
+  - weaknesses: 아쉬운 점. 턴 번호와 함께 1~2문장
+- best_moment: 토론에서 가장 인상적이었던 한 장면
+  - turn: 턴 번호 (예: "#12")
+  - name: 그 발언을 한 사람
+  - why: 왜 인상적이었는지 한 문장"""
+
+
+def verdict_schema() -> dict:
+    text = {"type": "string"}
+    return {
+        "type": "object",
+        "properties": {
+            "summary": text, "winner": text, "reason": text,
+            "ranking": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"name": text, "score": {"type": "integer"}, "strengths": text, "weaknesses": text},
+                "required": ["name", "score", "strengths", "weaknesses"], "additionalProperties": False}},
+            "best_moment": {
+                "type": "object",
+                "properties": {"turn": text, "name": text, "why": text},
+                "required": ["turn", "name", "why"], "additionalProperties": False},
+        },
+        "required": ["summary", "winner", "reason", "ranking", "best_moment"],
+        "additionalProperties": False,
+    }
+
+
+def verdict_prompt(topic: str, people: list[str], speeches: list[dict]) -> str:
+    return f"""주제: {topic.strip()}
+참가자: {', '.join(people)}
+
+기록 (턴 번호 · 시작 시각 · 발언자):
+{transcript_lines(speeches)}
+
+위 기록으로 판정하세요.
+{VERDICT_FIELDS}"""
+
+
+def clean_verdict(data: dict, names: list[str]) -> dict:
+    """판정에서 참가자가 아닌 이름을 빼고, 점수를 0~100으로 맞춰 높은 순서로 세운다."""
+    known = set(names)
+    rows = []
+    for row in data.get("ranking") or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name", "")).strip()
+        if name not in known:
+            name = name.split("(")[0].strip()   # "이름(직함)"으로 적는 일이 있다
+        if name not in known or any(r["name"] == name for r in rows):
+            continue
+        try:
+            score = max(0, min(100, int(row.get("score", 0))))
+        except (TypeError, ValueError):
+            score = 0
+        rows.append({"name": name, "score": score,
+                     "strengths": str(row.get("strengths", "")), "weaknesses": str(row.get("weaknesses", ""))})
+    rows.sort(key=lambda r: -r["score"])
+    winner = str(data.get("winner", "")).strip()
+    if winner not in known:
+        winner = winner.split("(")[0].strip()
+    moment = data.get("best_moment") if isinstance(data.get("best_moment"), dict) else {}
+    return {"summary": str(data.get("summary", "")), "winner": winner if winner in known else "",
+            "reason": str(data.get("reason", "")), "ranking": rows,
+            "best_moment": {k: str(moment.get(k, "")) for k in ("turn", "name", "why")}}
+
+
+# ---------------------------------------------------------------- 끝난 토론을 두고 묻고 답하기
+ANALYST_SYSTEM = """당신은 사용자와 함께 이 토론을 지켜본 분석가입니다. 토론이 끝난 뒤, 사용자가 이 토론에 대해 묻는 말에 답합니다.
+
+- 당신은 토론 참가자가 아닙니다. 어느 참가자의 편도 들지 않고, 참가자의 말투를 흉내 내지 않습니다. 사용자 옆에서 같이 본 사람으로서 설명하고 분석합니다.
+- 토론에서 누가 무슨 말을 했는지는 아래 기록에 있는 대로만 말합니다. 기록에 없는 발언을 지어내지 않습니다. 근거가 되는 발언은 턴 번호(#12)와 발언자 이름으로 짚습니다.
+- 사용자가 평가나 의견을 물으면 분석가로서의 판단을 말하되, 기록에 있는 사실과 당신의 판단을 구분해서 말합니다.
+- 기록만으로 알 수 없는 것은 알 수 없다고 말합니다. 토론 밖의 일반 지식으로 보충할 때는 그것이 기록 밖의 이야기임을 밝힙니다.
+- 묻는 것에 바로 답합니다. 평이한 한국어 문장으로, 필요한 만큼만 씁니다. 여러 가지를 나열할 때만 줄 앞에 '- '를 붙이고, 제목 기호(#)나 굵게(**) 같은 마크다운은 쓰지 않습니다."""
+
+
+def analyst_context(topic: str, people: list[str], speeches: list[dict], minutes: dict | None,
+                    verdict: dict | None) -> str:
+    """질문마다 똑같이 들어가는 앞부분: 규칙, 기록, 회의록 요지, 판정. 캐시로 읽힌다."""
+    parts = [ANALYST_SYSTEM, "", f"# 토론 주제\n{topic.strip()}", f"# 참석자\n{', '.join(people)}",
+             "# 기록 (턴 번호 · 시작 시각 · 발언자)", transcript_lines(speeches)]
+    if minutes:
+        parts += ["# 회의록 요지", str(minutes.get("overview", ""))]
+        for label, key in (("합의 사항", "agreements"), ("미결 사항", "open_issues")):
+            items = [str(x) for x in minutes.get(key) or []]
+            if items:
+                parts.append(f"{label}: " + " / ".join(items))
+    if verdict and verdict.get("ranking"):
+        rows = ", ".join(f"{r['name']} {r['score']}점" for r in verdict["ranking"])
+        parts += ["# 심사위원 판정 (참고)", f"{verdict.get('summary', '')} 점수: {rows}"]
+    return "\n\n".join(parts)
+
+
+def analyst_prompt(history: list[dict], question: str) -> str:
+    lines = []
+    for item in history[-12:]:   # 앞서 주고받은 문답. 너무 길어지지 않게 최근 것만
+        lines += [f"질문: {item.get('q', '')}", f"답: {item.get('a', '')}", ""]
+    lines.append(f"질문: {question.strip()}")
+    return "\n".join(lines)

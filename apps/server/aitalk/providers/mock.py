@@ -6,8 +6,10 @@ P-GPT의 상태 유지 방식(응답 ID, 곁가지, 압축 신호)을 흉내 내
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import re
+from typing import Optional
 
 from ..prompts import INTENTS, MOODS
 from .base import Context, ModelInfo, OnEvent, Provider, Speech, Usage
@@ -160,10 +162,11 @@ class MockContext(Context):
         self.entries.append((speaker, text))
 
     async def judge(self, *, question: str, schema: dict, model: str,
-                    effort: str) -> tuple[dict, Usage]:
+                    effort: str, on_event: Optional[OnEvent] = None) -> tuple[dict, Usage]:
         self.p.calls.append(("judge", "", self.head))
         if {"headline", "agenda"} & set(schema.get("properties", {})):   # 끝난 뒤의 회의록
-            return await self.p.generate_json(system="", prompt="", schema=schema, model=model, effort=effort)
+            return await self.p.generate_json(system="", prompt="", schema=schema, model=model, effort=effort,
+                                              on_event=on_event)
         await asyncio.sleep(self.p.latency)
         names_m = re.search(r"참가자: (.+)", question)
         names = [n.strip() for n in names_m.group(1).split(",")] if names_m else []
@@ -228,7 +231,17 @@ class MockProvider(Provider):
         return MockContext(self, shared, compact_threshold)
 
     async def generate_json(self, *, system: str, prompt: str, schema: dict,
-                            model: str, effort: str) -> tuple[dict, Usage]:
+                            model: str, effort: str,
+                            on_event: Optional[OnEvent] = None) -> tuple[dict, Usage]:
+        data, usage = await self._json(prompt, schema)
+        if on_event:   # 실제 모델처럼 JSON 글을 조각조각 흘려보낸다
+            text = json.dumps(data, ensure_ascii=False)
+            for at in range(0, len(text), 24):
+                on_event("text", text[at:at + 24])
+                await asyncio.sleep(self.latency / 10)
+        return data, usage
+
+    async def _json(self, prompt: str, schema: dict) -> tuple[dict, Usage]:
         await asyncio.sleep(self.latency)
         props = schema.get("properties", {})
         if "id" in props.get("personas", {}).get("items", {}).get("properties", {}):
@@ -280,6 +293,16 @@ class MockProvider(Provider):
                 "open_issues": ["비용을 누가 낼지 정하지 못함"], "follow_ups": [],
                 "conclusion": "속도보다 비용 부담 원칙을 먼저 정해야 한다는 의견으로 마무리됨.",
             }, Usage(input=900, output=260)
+        if "ranking" in props:
+            names = re.search(r"참가자: (.+)", prompt)
+            people = [n.strip() for n in names.group(1).split(",")] if names else ["참가자"]
+            return {
+                "summary": "근거를 구체적으로 든 쪽이 앞섰고, 반박에 답하지 못한 장면에서 차이가 났음.",
+                "winner": people[0], "reason": "상대의 질문에 수치를 들어 답했고 끝까지 입장이 일관됐음.",
+                "ranking": [{"name": n, "score": max(40, 88 - i * 9), "strengths": "논점을 분명히 세움",
+                             "weaknesses": "비용 질문에 답을 미룸"} for i, n in enumerate(people)],
+                "best_moment": {"turn": "#6", "name": people[0], "why": "상대 주장의 빈틈을 짧게 짚음"},
+            }, Usage(input=900, output=240)
         if "headline" in props:
             return {
                 "headline": "문제에는 동의했지만 해법의 속도에서 갈렸다",
@@ -294,6 +317,18 @@ class MockProvider(Provider):
                             effort: str) -> tuple[str, Usage]:
         await asyncio.sleep(self.latency)
         return "(시험용 요약) 앞부분에서는 비용과 속도를 두고 의견이 갈렸습니다.", Usage(input=300, output=60)
+
+    async def stream_text(self, *, system: str, prompt: str, model: str, effort: str,
+                          on_event: OnEvent) -> tuple[str, Usage]:
+        await asyncio.sleep(self.latency)
+        asked = re.findall(r"^질문: (.+)$", prompt, re.MULTILINE)
+        text = (f"(시험용 답변) '{asked[-1] if asked else '질문'}'에 대해 기록을 보면, 비용 부담을 두고 가장 길게 맞섰습니다.\n\n"
+                "- 한쪽은 당장 시작하자고 했습니다.\n- 다른 쪽은 단계적으로 가자고 했습니다.\n\n"
+                "제 분석으로는 속도보다 비용 원칙이 먼저 정해져야 합니다.")
+        for piece in re.findall(r"\S+\s*", text):
+            on_event("text", piece)
+            await asyncio.sleep(self.latency / 12)
+        return text, Usage(input=800, cached=600, output=len(text) // 2)
 
     async def research(self, *, prompt: str, model: str, effort: str, on_event: OnEvent) -> Speech:
         on_event("search", "시험용 검색어")

@@ -1,13 +1,35 @@
-"""mock 프로바이더로 토론 엔진을 끝까지 돌려 본다."""
+"""mock 프로바이더로 토론 엔진을 끝까지 돌려 본다.
+
+화면에 글자를 내보내는 박자를 PACE배로 줄여 돌린다 (Debate.pace). 차례, 끊기, 개입의 앞뒤 관계는 그대로이고
+기다리는 시간만 줄어든다.
+"""
 import asyncio
+import copy
+import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from aitalk import store  # noqa: E402
+from aitalk import engine, store  # noqa: E402
 from aitalk.engine import MOD_ID, Debate  # noqa: E402
+from aitalk.providers.base import ProviderError  # noqa: E402
 from aitalk.providers.mock import MockProvider  # noqa: E402
+
+PACE = 0.06
+
+
+@pytest.fixture(autouse=True)
+def _fast(monkeypatch):
+    """모든 토론을 줄인 박자로 돌린다."""
+    real = Debate.__init__
+
+    def init(self, *args, **kw):
+        real(self, *args, **kw)
+        self.pace = PACE
+    monkeypatch.setattr(Debate, "__init__", init)
 
 
 def _config(**over):
@@ -256,3 +278,144 @@ def test_auto_length_uses_the_directors_choice(monkeypatch):
             assert len(lengths) >= 2, lengths          # 짧은 호흡과 긴 호흡이 섞인다
         else:
             assert lengths == {"1~2"}, lengths
+
+
+def test_progress_is_saved_after_every_speech(monkeypatch):
+    """발언이 끝날 때마다 저장한다. 서버가 꺼져도 그 발언까지는 남는다."""
+    saves = []
+    monkeypatch.setattr(store, "save_debate", lambda rec: saves.append(json.loads(json.dumps(rec, ensure_ascii=False))))
+    debate = Debate("d_save", _config(max_turns=12), MockProvider(latency=0, seed=3))
+    asyncio.run(debate.run())
+    counts = [len(rec["speeches"]) for rec in saves]
+    assert counts[:4] == [0, 1, 2, 3]                       # 시작할 때 한 번, 그 뒤로 발언마다
+    assert counts[-1] == len(debate.speeches)
+    mid = saves[3]
+    assert mid["state"] == "running" and mid["resume"]["turn_no"] == 3
+    assert [e[1] for e in mid["resume"]["entries"]] == [s["text"] for s in mid["speeches"]]
+    assert mid["resume"]["cfg"]["participants"][0]["hidden"] == "속내"   # 이어 가려면 숨은 속내와 자료 전문이 필요하다
+    assert saves[-1]["state"] == "ended" and saves[-1]["resume"] is None  # 끝난 토론에는 남기지 않는다
+
+
+@pytest.mark.parametrize("stop_after", [3, 8, 13])
+def test_interrupted_debate_resumes_after_the_last_finished_speech(monkeypatch, stop_after):
+    """서버가 꺼진 것처럼 중간 저장본만 남은 토론을 다시 세워 끝까지 간다 (모두발언 중, 자유토론 중, 마무리 발언 중)."""
+    saves = []
+    monkeypatch.setattr(store, "save_debate", lambda rec: saves.append(json.loads(json.dumps(rec, ensure_ascii=False))))
+    asyncio.run(Debate("d_res", _config(max_turns=16), MockProvider(latency=0, seed=3)).run())
+    record = next(rec for rec in saves if len(rec["speeches"]) == stop_after)   # 이 발언이 끝난 직후에 꺼졌다
+    before = copy.deepcopy(record["speeches"])
+    saves.clear()
+
+    debate = Debate.restore(record, MockProvider(latency=0, seed=9))
+    asyncio.run(debate.run())
+    assert debate.state == "ended"
+    assert debate.speeches[:stop_after] == before                              # 앞의 발언은 그대로
+    assert [s["id"] for s in debate.speeches] == list(range(1, len(debate.speeches) + 1))
+    assert [e["i"] for e in debate.events] == list(range(len(debate.events)))  # 이벤트 번호가 끊기지 않는다
+    assert debate.ctx.entries == [(s["name"], s["text"]) for s in debate.speeches]
+    kinds = [s["kind"] for s in debate.speeches]
+    assert kinds[0] == "open" and kinds[1:5] == ["statement"] * 4              # 모두발언을 빠뜨리거나 두 번 하지 않는다
+    assert kinds[-5:-1] == ["closing"] * 4 and kinds[-1] == "wrap"
+    assert kinds.count("closing") == 4 and kinds.count("wrap") == 1
+    assert [e["phase"] for e in debate.events if e["type"] == "phase"] == ["opening", "statements", "free", "closing", "wrap"]
+    assert sum(1 for e in debate.events if e["type"] == "init") == 1
+    assert any(e["type"] == "notice" and e.get("kind") == "resume" for e in debate.events)
+    assert debate.cost >= record["cost"] and saves[-1]["minutes"]["title"]
+
+
+def test_aborted_debate_drops_the_half_shown_speech_on_resume(monkeypatch):
+    """중단된 토론: 화면에 나오다 만 발언은 버리고, 끝난 발언 다음부터 이어 간다."""
+    saved = {}
+    monkeypatch.setattr(store, "save_debate", lambda rec: saved.update(json.loads(json.dumps(rec, ensure_ascii=False))))
+    debate = Debate("d_abort", _config(speed="fast", gap_scale=0.1, max_turns=14), MockProvider(latency=0.01, seed=3))
+
+    async def go():
+        debate.task = asyncio.create_task(debate.run())
+        while not (debate.turn_no >= 4 and debate._pos > 0 and not debate._shown.is_set()):
+            await asyncio.sleep(0.002)
+        debate.control("abort")
+        await asyncio.gather(debate.task, return_exceptions=True)
+
+    asyncio.run(go())
+    assert saved["state"] == "aborted"
+    done = len(saved["speeches"])
+    assert saved["resume"]["turn_no"] == done and len(saved["events"]) > saved["resume"]["n_events"]
+    again = Debate.restore(saved, MockProvider(latency=0, seed=4))
+    assert again.turn_no == done and again.events[-1]["type"] != "end"
+    asyncio.run(again.run())
+    assert again.state == "ended"
+    assert [s["id"] for s in again.speeches] == list(range(1, len(again.speeches) + 1))
+
+
+def _flaky(debate, fail, error):
+    """ctx.speak가 처음 fail번은 실패하게 만든다."""
+    async def drive(_):
+        while debate.ctx is None:
+            await asyncio.sleep(0.001)
+        real, left = debate.ctx.speak, [fail]
+
+        async def speak(**kw):
+            if debate.turn_no >= 3 and left[0] > 0:
+                left[0] -= 1
+                raise error
+            return await real(**kw)
+        debate.ctx.speak = speak
+    return drive
+
+
+def test_failed_call_is_retried_without_stopping(monkeypatch):
+    """AI 호출이 한두 번 실패해도 스스로 다시 시도해 토론이 멈추지 않는다."""
+    monkeypatch.setattr(store, "save_debate", lambda rec: None)
+    monkeypatch.setattr(engine, "RETRY_WAITS", (0.01, 0.01))
+    debate = Debate("d_retry", _config(max_turns=12), MockProvider(latency=0, seed=3))
+
+    async def go():
+        debate.task = asyncio.create_task(debate.run())
+        await _flaky(debate, 2, ProviderError("잠깐의 장애"))(debate)
+        await asyncio.wait_for(debate.task, timeout=30)
+
+    asyncio.run(go())
+    assert debate.state == "ended"
+    notes = [e for e in debate.events if e["type"] == "notice" and "다시 시도" in e.get("text", "")]
+    assert len(notes) == 2
+    assert not any(e["type"] == "error" for e in debate.events)
+    assert [s["id"] for s in debate.speeches] == list(range(1, len(debate.speeches) + 1))
+
+
+@pytest.mark.parametrize("fail,error", [(3, ProviderError("계속되는 장애")), (1, ProviderError("키가 틀림", retry=False))])
+def test_after_retries_run_out_it_waits_for_the_viewer(monkeypatch, fail, error):
+    """두 번 다시 해도 안 되거나, 다시 해도 소용없는 오류면 멈추고 '이어 하기'를 기다린다."""
+    monkeypatch.setattr(store, "save_debate", lambda rec: None)
+    monkeypatch.setattr(engine, "RETRY_WAITS", (0.01, 0.01))
+    debate = Debate("d_stop", _config(max_turns=12), MockProvider(latency=0, seed=3))
+
+    async def go():
+        debate.task = asyncio.create_task(debate.run())
+        await _flaky(debate, fail, error)(debate)
+        while debate.state != "error":
+            await asyncio.sleep(0.005)
+        debate.control("resume")
+        await asyncio.wait_for(debate.task, timeout=30)
+
+    asyncio.run(go())
+    assert debate.state == "ended"
+    assert sum(1 for e in debate.events if e["type"] == "error") == 1
+
+
+def test_minutes_are_streamed_to_viewers_but_not_kept_in_the_record(monkeypatch):
+    """회의록은 쓰이는 대로 화면에 보내고, 기록에는 다 쓴 것만 남긴다."""
+    monkeypatch.setattr(store, "save_debate", lambda rec: None)
+    debate = Debate("d_min", _config(max_turns=12), MockProvider(latency=0.05, seed=3))
+    queue: asyncio.Queue = asyncio.Queue()
+    debate.subs.add(queue)
+    asyncio.run(debate.run())
+    seen = []
+    while not queue.empty():
+        seen.append(queue.get_nowait())
+    partial = [e for e in seen if e["type"] == "minutes_partial"]
+    assert len(partial) >= 2 and all(e["i"] == -1 for e in partial)
+    assert partial[0]["minutes"].get("title")                                     # 앞에서부터 차오른다
+    assert len(json.dumps(partial[0]["minutes"])) < len(json.dumps(partial[-1]["minutes"]))
+    assert not any(e["type"] == "minutes_partial" for e in debate.events)
+    assert [e["i"] for e in debate.events] == list(range(len(debate.events)))
+    assert debate.minutes["title"] and debate.events[-2]["type"] == "minutes"

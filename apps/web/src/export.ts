@@ -50,6 +50,19 @@ export function recordToMarkdown(rec: DebateRecord): string {
   lines.push('');
 
   if (rec.minutes) lines.push(...minutesToMarkdown(rec.minutes));
+  if (rec.verdict) {
+    const v = rec.verdict;
+    lines.push('## 판정', '', v.winner ? `가장 설득력 있었던 참가자: **${v.winner}**` : '우열을 가리기 어려운 토론', '');
+    if (v.reason) lines.push(v.reason, '');
+    if (v.summary) lines.push(`총평: ${v.summary}`, '');
+    for (const r of v.ranking ?? []) lines.push(`- **${r.name}** (${r.score}점): 잘한 점 - ${r.strengths} / 아쉬운 점 - ${r.weaknesses}`);
+    if (v.best_moment?.why) lines.push('', `가장 인상적인 장면: ${v.best_moment.turn} ${v.best_moment.name} - ${v.best_moment.why}`);
+    lines.push('');
+  }
+  if (rec.qa?.length) {
+    lines.push('## 묻고 답하기', '');
+    for (const it of rec.qa) lines.push(`**질문: ${it.q}**`, '', it.a, '');
+  }
   if (rec.summary) {
     lines.push('## 요약', '', rec.summary.headline, '');
     for (const c of rec.summary.consensus ?? []) lines.push(`- 동의: ${c}`);

@@ -75,6 +75,9 @@ export interface DebateRecord {
   speeches: any[];
   summary: any;
   minutes?: any;
+  verdict?: any;                                   // 판정: 누가 더 설득력 있었는지
+  qa?: { q: string; a: string; at?: string }[];    // 토론이 끝난 뒤 주고받은 문답
+  resumable?: boolean;                             // 끝까지 가지 못했고 이어 갈 수 있는 토론
   cost?: number;
   cost_parts?: Record<string, number>;
   pricing?: Pricing;

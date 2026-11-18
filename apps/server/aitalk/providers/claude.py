@@ -57,7 +57,7 @@ def _friendly(exc: Exception) -> ProviderError:
     if isinstance(exc, ProviderError):
         return exc
     if isinstance(exc, anthropic.AuthenticationError):
-        return ProviderError("Claude 키가 올바르지 않습니다. .env의 ANTHROPIC_API_KEY를 확인하세요.")
+        return ProviderError("Claude 키가 올바르지 않습니다. .env의 ANTHROPIC_API_KEY를 확인하세요.", retry=False)
     if isinstance(exc, anthropic.RateLimitError):
         return ProviderError("Claude 사용 한도에 걸렸습니다. 잠시 뒤 '이어 하기'를 누르세요.")
     if isinstance(exc, anthropic.APIConnectionError):
@@ -65,6 +65,10 @@ def _friendly(exc: Exception) -> ProviderError:
     if isinstance(exc, anthropic.APIStatusError):
         return ProviderError(f"Claude 오류 ({exc.status_code}): {str(getattr(exc, 'message', exc))[:300]}")
     return ProviderError(f"Claude 호출 실패: {type(exc).__name__}: {str(exc)[:300]}")
+
+
+def _text_only(on_event: OnEvent) -> OnEvent:
+    return lambda kind, payload: on_event(kind, payload) if kind == "text" else None
 
 
 class ClaudeProvider(Provider):
@@ -144,10 +148,11 @@ class ClaudeProvider(Provider):
         """글자를 흘려보내며 받는다. 서버 도구가 중간에 멈추면(pause_turn) 이어서 받는다."""
         speech = Speech(model=params["model"])
         messages = list(params.pop("messages"))
+        hold = params.pop("hold", None)
         emitted = False
         for _ in range(6):
             try:
-                final = await self._stream_once(on_event, speech, messages=messages, **params)
+                final = await self._stream_once(on_event, speech, hold=hold, messages=messages, **params)
             except Exception as exc:  # noqa: BLE001
                 if not emitted and not speech.text and self._degrade(exc):
                     continue
@@ -177,13 +182,15 @@ class ClaudeProvider(Provider):
                 messages = messages + [{"role": "assistant", "content": final.content}]
                 continue
             if final.stop_reason == "refusal":
-                raise ProviderError("모델이 이 요청에 답하기를 거절했습니다.")
+                raise ProviderError("모델이 이 요청에 답하기를 거절했습니다.", retry=False)
             return speech
         return speech
 
-    async def _stream_once(self, on_event: OnEvent, speech: Speech, **params: Any) -> Any:
+    async def _stream_once(self, on_event: OnEvent, speech: Speech, hold: Optional[bool] = None,
+                           **params: Any) -> Any:
         tool_json: dict[int, str] = {}
-        hold = bool(params.get("tools"))   # 도구가 있으면 글 블록이 끝날 때까지 붙들어 둔다
+        if hold is None:
+            hold = bool(params.get("tools"))   # 도구가 있으면 글 블록이 끝날 때까지 붙들어 둔다
         held = ""
 
         def flush() -> None:
@@ -232,11 +239,17 @@ class ClaudeProvider(Provider):
         return ClaudeContext(self, shared, search, max_searches, compact_threshold)
 
     async def generate_json(self, *, system: str, prompt: str, schema: dict,
-                            model: str, effort: str) -> tuple[dict, Usage]:
+                            model: str, effort: str,
+                            on_event: Optional[OnEvent] = None) -> tuple[dict, Usage]:
+        if on_event:
+            speech = await self._stream(_text_only(on_event), model=model, effort=effort, system=system,
+                                        max_tokens=8000, schema=schema,
+                                        messages=[{"role": "user", "content": prompt}])
+            return parse_json(speech.text), speech.usage
         msg = await self._create(model=model, effort=effort, system=system, max_tokens=8000,
                                  messages=[{"role": "user", "content": prompt}], schema=schema)
         if msg.stop_reason == "refusal":
-            raise ProviderError("모델이 이 요청에 답하기를 거절했습니다.")
+            raise ProviderError("모델이 이 요청에 답하기를 거절했습니다.", retry=False)
         text = next((b.text for b in msg.content if b.type == "text"), "")
         return parse_json(text), _usage(msg.usage)
 
@@ -246,6 +259,14 @@ class ClaudeProvider(Provider):
                                  messages=[{"role": "user", "content": prompt}])
         text = "".join(b.text for b in msg.content if b.type == "text")
         return text.strip(), _usage(msg.usage)
+
+    async def stream_text(self, *, system: str, prompt: str, model: str, effort: str,
+                          on_event: OnEvent) -> tuple[str, Usage]:
+        # system은 같은 기록에 대한 질문이 이어질 때 캐시로 읽히도록 캐시 지점을 둔다
+        speech = await self._stream(_text_only(on_event), model=model, effort=effort, max_tokens=6000,
+                                    system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                                    messages=[{"role": "user", "content": prompt}])
+        return speech.text.strip(), speech.usage
 
     async def research(self, *, prompt: str, model: str, effort: str, on_event: OnEvent) -> Speech:
         tools = web_tools(model, 4, fetch=True)
@@ -301,18 +322,25 @@ class ClaudeContext(Context):
         self.entries.append((speaker, text))
 
     async def judge(self, *, question: str, schema: dict, model: str,
-                    effort: str) -> tuple[dict, Usage]:
+                    effort: str, on_event: Optional[OnEvent] = None) -> tuple[dict, Usage]:
         """곁가지 판단.
 
         먼저 발언자 호출과 똑같은 앞부분(도구, system, 기록)으로 부르고 JSON 틀은 걸지 않는다.
         틀을 걸면 요청 앞부분이 달라져 캐시를 따로 쓰게 되고, 발언마다 캐시를 두 번 쓰게 된다.
         받은 글이 JSON으로 읽히지 않을 때만 틀을 걸어 한 번 더 부른다.
+        on_event를 주면(회의록) 만들어지는 글을 그대로 흘려보낸다.
         """
-        msg = await self.p._create(model=model, effort=effort, system=self._system(),
-                                   messages=self._messages(question), max_tokens=12000,
-                                   tools=self._tools(model))
-        usage = _usage(msg.usage)
-        text = "".join(b.text for b in msg.content if b.type == "text")
+        if on_event:
+            speech = await self.p._stream(_text_only(on_event), model=model, effort=effort, system=self._system(),
+                                          messages=self._messages(question), max_tokens=12000,
+                                          tools=self._tools(model), hold=False)
+            usage, text = speech.usage, speech.text
+        else:
+            msg = await self.p._create(model=model, effort=effort, system=self._system(),
+                                       messages=self._messages(question), max_tokens=12000,
+                                       tools=self._tools(model))
+            usage = _usage(msg.usage)
+            text = "".join(b.text for b in msg.content if b.type == "text")
         try:
             data = parse_json(text)
             if fits(data, schema):
@@ -320,6 +348,12 @@ class ClaudeContext(Context):
         except (ProviderError, ValueError):
             pass
         self.p.judge_fallbacks += 1
+        if on_event:
+            on_event("reset", None)
+            speech = await self.p._stream(_text_only(on_event), model=model, effort=effort, system=self._system(),
+                                          messages=self._messages(question), max_tokens=12000, schema=schema)
+            usage.add(speech.usage)
+            return parse_json(speech.text), usage
         msg = await self.p._create(model=model, effort=effort, system=self._system(),
                                    messages=self._messages(question), max_tokens=12000,
                                    schema=schema)

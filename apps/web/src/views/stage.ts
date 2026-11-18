@@ -1,6 +1,6 @@
 import {
-  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, ListOrdered, LoaderCircle, Megaphone, Pause, PenLine, Play,
-  Rewind, Search, Send, SkipForward, TriangleAlert, Zap, type IconNode,
+  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, ListOrdered, LoaderCircle, Megaphone, MessagesSquare, Pause,
+  PenLine, Play, Rewind, Scale, Search, Send, SkipForward, StepForward, TriangleAlert, Trophy, Zap, type IconNode,
 } from 'lucide';
 import { api } from '../api';
 import { CitationRegistry, collectSources, parseCitations } from '../citations';
@@ -16,6 +16,11 @@ interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; av: HT
 
 const SPEEDS: [string, string][] = [['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']];
 const CPS: Record<string, number> = { slow: 8, normal: 14, fast: 26 };   // 서버가 글자를 내보내는 속도와 같다
+const SPEECH_CPS = 5.5;   // 토론 시계: 사람이 말하는 속도(초당 글자). 서버의 값과 같다
+const QUESTIONS = ['누가 가장 설득력 있었나요?', '가장 크게 갈린 쟁점은 무엇이었나요?', '빠진 관점이 있다면 무엇인가요?'];
+
+/** 타임라인의 한 칸: 발언 하나가 차지하는 구간(진행률 %)과, 그 발언이 시작되는 이벤트의 자리. */
+interface Mark { id: number; index: number; from: number; to: number; name: string }
 
 export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () => void {
   const seats = new Map<string, Seat>();
@@ -33,6 +38,15 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   let disposed = false;
   let stick = true;
   let writingMinutes = false;
+  let judging = false;
+  let asking = false;
+  let resuming = false;
+  let verdictEl: HTMLElement | null = null;
+  let qaEl: HTMLElement | null = null;
+  let liveCard: Card | null = null;   // 지금 글자가 나오고 있는 발언
+  let marks: Mark[] = [];
+  // 토론 시계: 서버는 발언이 끝날 때만 알려 준다. 그 사이에는 화면에 나온 글자 수로 어림해 1초씩 올린다
+  const clock = { base: 0, shown: 0, max: null as number | null };
   let minutesEl: HTMLElement | null = null;
   let waitEl: HTMLElement | null = null;   // 회의록을 쓰는 동안 그 자리에 놓는 카드
   let waitTimer = 0;
@@ -63,6 +77,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   const fill = h('div', { class: 'track-fill' });
   const head = h('div', { class: 'track-head', style: 'left:0' });
   const track = h('div', { class: 'track' }, fill, head);
+  const scrubTip = h('div', { class: 'scrub-tip', 'aria-hidden': 'true' });
+  const timeline = h('div', { class: 'timeline', role: 'slider', 'aria-label': '토론 위치', 'aria-valuemin': 0, 'aria-valuemax': 100 }, track, scrubTip);
   const controls = h('div', { class: 'controls' });
   const embers = h('div', { class: 'embers' }, Array.from({ length: 14 }, () =>
     h('i', { style: `left:${(Math.random() * 100).toFixed(1)}%;--dx:${(Math.random() * 80 - 40).toFixed(0)}px;animation-duration:${(9 + Math.random() * 10).toFixed(1)}s;animation-delay:${(-Math.random() * 16).toFixed(1)}s` })));
@@ -73,7 +89,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         h('span', { tip: '토론 시계: 실제로 말했다면 걸렸을 시간' }, icon(Hourglass, 16), clockTime),
         h('span', { tip: '지금까지 든 예상 비용: 토큰 요금 + 웹 검색 요금' }, icon(Coins, 16), clockCost), sideBtn)),
     h('div', { class: 'stage-body' }, transcript, side, cast),
-    h('footer', { class: 'dock' }, h('div', { class: 'timeline' }, track), controls));
+    h('footer', { class: 'dock' }, timeline, controls));
   root.append(stage);
 
   transcript.addEventListener('scroll', () => {
@@ -81,6 +97,23 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   });
   const follow = () => { if (stick) transcript.scrollTop = transcript.scrollHeight; };
   sideBtn.addEventListener('click', () => { side.classList.toggle('is-closed'); if (!side.classList.contains('is-closed')) paintSide(); });
+
+  /* ---------- 토론 시계 ---------- */
+  function paintClock(): void {
+    clockTime.textContent = clock.max ? `${fmtTime(clock.shown)} / ${fmtTime(clock.max)}` : fmtTime(clock.shown);
+  }
+  /** 서버가 알려 준 시각으로 맞춘다. 조금 앞서 있으면 째깍이며 따라가게 두고, 많이 벌어졌으면 바로 맞춘다. */
+  function setClock(seconds: number, snap: boolean): void {
+    clock.base = seconds;
+    if (snap || seconds - clock.shown > 12 || seconds < clock.shown) clock.shown = seconds;
+    paintClock();
+  }
+  const clockTimer = window.setInterval(() => {
+    const said = liveCard ? Array.from(liveCard.raw).length / SPEECH_CPS : 0;   // 지금 발언에서 이미 말한 만큼
+    if (clock.shown + 1 > clock.base + said) return;
+    clock.shown = Math.floor(clock.shown) + 1;
+    paintClock();
+  }, 200);
 
   /* ---------- 옆 패널 ---------- */
   let tab: 'usage' | 'sources' | 'materials' = 'usage';
@@ -241,7 +274,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const cls = ['sp', 'is-live', ev.interject ? 'sp--interject' : '', p.id === 'moderator' ? 'sp--mod' : ''].filter(Boolean).join(' ');
     const rootEl = h('article', { class: cls, style: `--c:${color}` }, av, body);
     inner.append(rootEl);
-    cards.set(ev.id, { root: rootEl, text, body, av, speaker: ev.speaker, cut: false, started: false, raw: '', shown: '' });
+    liveCard = { root: rootEl, text, body, av, speaker: ev.speaker, cut: false, started: false, raw: '', shown: '' };
+    cards.set(ev.id, liveCard);
     follow();
   }
 
@@ -288,6 +322,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   function endSpeech(ev: DebateEvent): void {
     const card = cards.get(ev.id);
     if (!card) return;
+    if (liveCard === card) liveCard = null;
     if (ev.failed) { card.root.remove(); cards.delete(ev.id); return; }
     card.root.classList.remove('is-live');
     setAvatar(card.av, { state: ev.cut ? 'cut' : 'listening' });   // 말이 끝나면 그 감정으로 듣는 자세가 된다
@@ -369,8 +404,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         h('div', { class: 'mw-clock', tip: '쓰기 시작한 뒤 지난 시간', 'aria-hidden': 'true' }, icon(Hourglass, 14), elapsed)),
       h('div', { class: 'mw-lines', 'aria-hidden': 'true' }, [0, 1, 2, 3].map(() => h('i', null))));
     waitTimer = window.setInterval(() => { elapsed.textContent = fmtTime((performance.now() - started) / 1000); }, 1000);
-    if (minutesEl) minutesEl.before(waitEl);   // 다시 쓰는 중이면 예전 회의록 바로 위에
-    else if (costEl) costEl.before(waitEl);
+    const below = [minutesEl, verdictEl, qaEl, costEl].find((el) => el?.isConnected);   // 다시 쓰는 중이면 예전 회의록 바로 위에
+    if (below) below.before(waitEl);
     else inner.append(waitEl);
     if (scroll) waitEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
     else follow();
@@ -382,31 +417,155 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     waitEl = null;
   }
 
-  function showMinutes(m: any, scroll = false): void {
+  /** 토론 아래에 붙는 카드의 차례: 회의록, 판정, 묻고 답하기, 총 비용. 새로 만든 카드를 제자리에 넣는다. */
+  function placeTail(el: HTMLElement): void {
+    const order = [minutesEl, verdictEl, qaEl, costEl];
+    const next = order.slice(order.indexOf(el) + 1).find((x) => x?.isConnected);
+    if (next) next.before(el);
+    else inner.append(el);
+  }
+
+  /** 회의록. partial이면 쓰이고 있는 중이라, 지금까지 온 항목만 그린다 (오지 않은 항목을 "없음"이라고 하지 않는다). */
+  function showMinutes(m: any, opts: { scroll?: boolean; partial?: boolean } = {}): void {
     hideMinutesWait();
-    minutesEl?.remove();
-    const list = (title: string, items: string[]) => h('div', null, h('h3', null, title),
-      items?.length ? h('ul', null, items.map((it) => h('li', null, it))) : h('p', { class: 'muted' }, '없음'));
-    minutesEl = h('div', { class: 'panel frame summary minutes' },
-      h('div', { class: 'minutes-tag' }, icon(FileText, 16), '회의록'),
-      h('h2', null, m.title),
-      h('h3', null, '전체 흐름'),
-      h('p', { class: 'minutes-over' }, m.overview),
+    const partial = !!opts.partial;
+    const has = (key: string) => (partial ? m[key] !== undefined && (!Array.isArray(m[key]) || m[key].length > 0) : true);
+    const list = (title: string, key: string) => (has(key) ? h('div', null, h('h3', null, title),
+      m[key]?.length ? h('ul', null, m[key].map((it: string) => h('li', null, it))) : h('p', { class: 'muted' }, '없음')) : null);
+    if (!minutesEl?.isConnected) {
+      minutesEl = h('div', { class: 'panel frame summary minutes' });
+      placeTail(minutesEl);
+    }
+    minutesEl.classList.toggle('is-writing', partial);
+    clear(minutesEl);
+    put(minutesEl,
+      h('div', { class: 'minutes-tag' }, icon(partial ? LoaderCircle : FileText, 16, partial ? 'spin' : ''), partial ? '회의록 · 쓰는 중' : '회의록'),
+      h('h2', null, m.title ?? ''),
+      has('overview') ? h('h3', null, '전체 흐름') : null,
+      has('overview') ? h('p', { class: 'minutes-over' }, m.overview) : null,
       (m.timeline ?? []).length ? h('div', null, h('h3', null, '시간대별 흐름'),
         h('div', { class: 'tl' }, m.timeline.map((t: any) => h('div', { class: 'tl-item' },
-          h('div', { class: 'tl-when' }, h('b', null, t.time), h('span', null, t.turns)),
-          h('div', { class: 'tl-what' }, h('b', null, t.phase), h('p', null, t.summary),
+          h('div', { class: 'tl-when' }, h('b', null, t.time ?? ''), h('span', null, t.turns ?? '')),
+          h('div', { class: 'tl-what' }, h('b', null, t.phase ?? ''), h('p', null, t.summary ?? ''),
             (t.issues ?? []).length ? h('ul', null, t.issues.map((it: string) => h('li', null, it))) : null))))) : null,
-      list('안건', m.agenda),
-      h('h3', null, '주요 논의'),
-      (m.discussions ?? []).map((d: any) => h('div', { class: 'issue' }, h('b', null, d.topic),
+      list('안건', 'agenda'),
+      has('discussions') ? h('h3', null, '주요 논의') : null,
+      (m.discussions ?? []).map((d: any) => h('div', { class: 'issue' }, h('b', null, d.topic ?? ''),
         h('div', { class: 'issue-pos' }, (d.points ?? []).flatMap((pt: any) => [
-          h('span', { style: `--c:${nameColor(pt.name)}` }, pt.name), h('span', null, pt.point)])))),
-      list('합의 사항', m.agreements), list('미결 사항', m.open_issues), list('후속 조치', m.follow_ups),
-      h('div', { class: 'takeaway' }, m.conclusion));
-    inner.append(minutesEl);
-    if (costEl) inner.append(costEl);   // 총 비용은 늘 맨 아래에
-    if (scroll) minutesEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+          h('span', { style: `--c:${nameColor(pt.name ?? '')}` }, pt.name ?? ''), h('span', null, pt.point ?? '')])))),
+      list('합의 사항', 'agreements'), list('미결 사항', 'open_issues'), list('후속 조치', 'follow_ups'),
+      has('conclusion') ? h('div', { class: 'takeaway' }, m.conclusion) : null);
+    if (opts.scroll) minutesEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  /** 판정: 누가 더 설득력 있었는지. partial이면 쓰이고 있는 중이다. */
+  function showVerdict(v: any, opts: { scroll?: boolean; partial?: boolean } = {}): void {
+    const partial = !!opts.partial;
+    if (!verdictEl?.isConnected) {
+      verdictEl = h('div', { class: 'panel frame summary minutes verdict' });
+      placeTail(verdictEl);
+    }
+    verdictEl.classList.toggle('is-writing', partial);
+    const decided = !partial || v.reason !== undefined;   // 이름을 쓰는 도중에는 제목에 올리지 않는다
+    const moment = v.best_moment ?? {};
+    clear(verdictEl);
+    put(verdictEl,
+      h('div', { class: 'minutes-tag' }, icon(partial ? LoaderCircle : Scale, 16, partial ? 'spin' : ''), partial ? '판정 · 쓰는 중' : '판정'),
+      decided ? h('h2', { class: 'verdict-head' }, v.winner ? icon(Trophy, 22) : null,
+        v.winner ? h('span', { style: `--c:${nameColor(v.winner)}` }, v.winner) : null,
+        v.winner ? '의 설득력이 가장 높았습니다' : '우열을 가리기 어려운 토론이었습니다') : h('h2', null, ''),
+      v.reason ? h('p', { class: 'minutes-over' }, v.reason) : null,
+      v.summary ? h('h3', null, '총평') : null,
+      v.summary ? h('p', { class: 'minutes-over' }, v.summary) : null,
+      (v.ranking ?? []).length ? h('h3', null, '참가자별 평가') : null,
+      (v.ranking ?? []).map((r: any) => {
+        const score = Math.max(0, Math.min(100, Number(r.score) || 0));
+        return h('div', { class: 'issue verdict-row', style: `--c:${nameColor(r.name ?? '')}` },
+          h('div', { class: 'verdict-who' }, h('b', null, r.name ?? ''),
+            h('div', { class: 'verdict-bar', role: 'img', 'aria-label': `설득력 ${score}점` }, h('i', { style: `width:${score}%` })),
+            h('span', { class: 'verdict-score' }, r.score === undefined ? '' : `${score}점`)),
+          h('div', { class: 'issue-pos' },
+            r.strengths ? h('span', null, '잘한 점') : null, r.strengths ? h('span', null, r.strengths) : null,
+            r.weaknesses ? h('span', null, '아쉬운 점') : null, r.weaknesses ? h('span', null, r.weaknesses) : null));
+      }),
+      moment.why ? h('div', { class: 'takeaway' }, h('small', null, `가장 인상적인 장면 · ${moment.turn ?? ''} ${moment.name ?? ''}`), moment.why) : null,
+      partial ? null : h('p', { class: 'muted small', style: 'margin-top:1rem' }, '어느 입장이 옳은지가 아니라 누가 토론을 더 잘했는지를 본 AI의 평가입니다.'));
+    if (opts.scroll) verdictEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  /** 묻고 답하기: 끝난 토론을 두고 사용자가 묻고, 함께 지켜본 분석가(참가자가 아님)가 답한다. 회의록 아래로 쌓인다. */
+  function showQa(): void {
+    if (!record?.speeches?.length && !cards.size) return;
+    const draft = (qaEl?.querySelector('.qa-input') as HTMLInputElement | null)?.value ?? '';
+    qaEl?.remove();
+    const items = h('div', { class: 'qa-list' });
+    const item = (q: string, a: string) => {
+      const answer = h('div', { class: 'qa-a' }, a);
+      items.append(h('div', { class: 'qa-item' }, h('div', { class: 'qa-q' }, q), answer));
+      return answer;
+    };
+    for (const it of record?.qa ?? []) item(it.q, it.a);
+    const input = h('input', { class: 'input qa-input', maxlength: 2000, placeholder: '이 토론에 대해 물어보세요. 예) 왜 이 사람이 밀렸나요?', 'aria-label': '토론에 대한 질문' });
+    input.value = draft;
+    const sendBtn = h('button', { type: 'button', class: 'btn btn--icon', tip: '질문 보내기', 'aria-label': '질문 보내기' }, icon(Send, 18));
+    const hints = h('div', { class: 'qa-hints' });
+    const paintHints = () => {
+      clear(hints);
+      if (record?.qa?.length || asking) return;
+      QUESTIONS.forEach((q) => hints.append(h('button', { type: 'button', class: 'chip', onclick: () => ask(q) }, q)));
+    };
+    const ask = async (text: string) => {
+      const question = text.trim();
+      if (!question || asking || !record) return;
+      asking = true;
+      input.value = '';
+      input.disabled = true;
+      sendBtn.disabled = true;
+      paintHints();
+      const answer = item(question, '');
+      const row = answer.parentElement as HTMLElement;
+      const wait = h('span', { class: 'sp-wait' }, h('i'), h('i'), h('i'));
+      answer.append(wait);
+      row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      let text2 = '';
+      try {
+        const res = await api.ask(id, question, (piece) => {
+          text2 += piece;
+          answer.textContent = text2;
+          if (stick) transcript.scrollTop = transcript.scrollHeight;
+        });
+        record.qa = res.qa;
+        answer.textContent = res.qa[res.qa.length - 1]?.a ?? text2;
+        applyCost(res);
+      } catch (err) {
+        row.remove();
+        input.value = question;   // 다시 보낼 수 있게 돌려놓는다
+        toast((err as Error).message, 'error');
+      } finally {
+        asking = false;
+        input.disabled = false;
+        sendBtn.disabled = false;
+        paintHints();
+        if (qaEl?.isConnected) input.focus({ preventScroll: true });
+      }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) ask(input.value); });
+    sendBtn.addEventListener('click', () => ask(input.value));
+    paintHints();
+    qaEl = h('div', { class: 'panel frame summary qa' },
+      h('div', { class: 'minutes-tag' }, icon(MessagesSquare, 16), '묻고 답하기'),
+      h('p', { class: 'muted qa-note' }, '이 토론에 대해 궁금한 것을 물어보세요. 참가자가 아니라, 함께 지켜본 분석가의 입장에서 답합니다.'),
+      items, hints, h('div', { class: 'qa-form' }, input, sendBtn));
+    placeTail(qaEl);
+  }
+
+  /** 끝난 뒤에 든 비용(회의록, 판정, 답변)을 받아 총 비용을 다시 그린다. */
+  function applyCost(res: { cost: number; cost_parts: Record<string, number> }): void {
+    if (record) { record.cost = res.cost; record.cost_parts = res.cost_parts; }
+    money.cost = res.cost;
+    money.parts = res.cost_parts;
+    paintCost();
+    showCost();
   }
 
   function paintCost(): void {
@@ -415,22 +574,24 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
 
   /** 끝난 토론의 맨 아래에 총 비용과 내역을 보여 준다. 회의록을 쓰면 그 비용까지 더해 다시 그린다. */
   function showCost(): void {
-    costEl?.remove();
     const p = money.parts;
     const row = (label: string, usd: number, note = '') => h('div', { class: 'cost-row' },
       h('span', null, label, note ? h('small', null, note) : null), h('b', null, fmtCost(usd, money.rate)));
     const t = usage?.total ?? record?.usage;
-    costEl = h('div', { class: 'panel frame summary costcard' },
+    const old = costEl;
+    const fresh = h('div', { class: `panel frame summary costcard${old ? ' is-redraw' : ''}` },
       h('div', { class: 'minutes-tag' }, icon(Coins, 16), '총 비용'),
       h('h2', null, fmtCost(money.cost, money.rate)),
       h('div', { class: 'cost-rows' },
         row('토론 (토큰)', p.tokens ?? money.cost, t ? `입력 ${(t.input + t.cached + t.cache_write).toLocaleString()} · 출력 ${t.output.toLocaleString()} 토큰` : ''),
         row('웹 검색', p.search ?? 0, `${money.searches.toLocaleString()}건 × ${fmtCost(money.searchUsd, money.rate)}`),
         (p.prep ?? 0) > 0 ? row('참가자 생성', p.prep) : null,
-        (p.minutes ?? 0) > 0 ? row('회의록', p.minutes) : null),
+        (p.minutes ?? 0) > 0 ? row('회의록', p.minutes) : null,
+        (p.extra ?? 0) > 0 ? row('판정과 질문', p.extra, '토론이 끝난 뒤에 든 비용') : null),
       h('p', { class: 'muted small' }, `측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`));
-    inner.append(costEl);
-    follow();
+    old?.remove();
+    inner.append(fresh);
+    costEl = fresh;
   }
 
   async function writeMinutes(): Promise<void> {
@@ -439,21 +600,57 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     paintControls();
     showMinutesWait(true);
     try {
-      const res = await api.minutes(id);
+      const res = await api.minutes(id, (part) => showMinutes(part, { partial: true }));   // 쓰이는 대로 보여 준다
       record.minutes = res.minutes;
-      record.cost = res.cost;
-      record.cost_parts = res.cost_parts;
-      money.cost = res.cost;
-      money.parts = res.cost_parts;
-      paintCost();
-      showMinutes(res.minutes, true);
-      showCost();
+      showMinutes(res.minutes);
+      applyCost(res);
       toast('회의록을 만들었습니다.');
     } catch (err) {
+      if (record.minutes) showMinutes(record.minutes);   // 쓰다 만 것을 치우고 예전 회의록으로 돌려놓는다
+      else { minutesEl?.remove(); minutesEl = null; }
       toast((err as Error).message, 'error');
     } finally {
       hideMinutesWait();
       writingMinutes = false;
+      paintControls();
+    }
+  }
+
+  async function judge(): Promise<void> {
+    if (judging || !record) return;
+    judging = true;
+    paintControls();
+    showVerdict({}, { partial: true, scroll: true });
+    try {
+      const res = await api.verdict(id, (part) => showVerdict(part, { partial: true }));
+      record.verdict = res.verdict;
+      showVerdict(res.verdict);
+      applyCost(res);
+    } catch (err) {
+      if (record.verdict) showVerdict(record.verdict);
+      else { verdictEl?.remove(); verdictEl = null; }
+      toast((err as Error).message, 'error');
+    } finally {
+      judging = false;
+      paintControls();
+    }
+  }
+
+  /** 서버가 꺼지거나 중단되어 끊긴 토론을, 마지막으로 끝난 발언 다음부터 이어 간다. */
+  async function resumeDebate(): Promise<void> {
+    if (resuming) return;
+    resuming = true;
+    paintControls();
+    try {
+      await api.resumeDebate(id);
+      replaying = false;
+      reset();
+      stage.classList.remove('is-ended');
+      await boot();
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    } finally {
+      resuming = false;
       paintControls();
     }
   }
@@ -475,6 +672,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   function handle(ev: DebateEvent, instant = false): void {
     switch (ev.type) {
       case 'init':
+        clock.max = ev.config.max_minutes ? ev.config.max_minutes * 60 : null;
+        paintClock();
         if (ev.pricing) money.searchUsd = ev.pricing.search_usd ?? money.searchUsd;   // 환율은 늘 지금의 고정값을 쓴다
         topic.textContent = ev.config.topic;
         badgeMode = ev.config.badge ?? 'on';
@@ -514,7 +713,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       case 'speech_end': endSpeech(ev); break;
       case 'clock': {
         clockTurn.textContent = ev.max_turns ? `${ev.turn} / ${ev.max_turns}` : String(ev.turn);
-        clockTime.textContent = ev.max_seconds ? `${fmtTime(ev.seconds)} / ${fmtTime(ev.max_seconds)}` : fmtTime(ev.seconds);
+        clock.max = ev.max_seconds ?? null;
+        setClock(Number(ev.seconds) || 0, instant || speed === 'instant');
         const pct = Math.min(100, (ev.progress ?? 0) * 100);
         fill.style.width = `${pct}%`;
         head.style.left = `${pct}%`;
@@ -546,6 +746,10 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         if (!ev.fatal) { state = 'error'; paintControls(); }
         break;
       case 'summarizing': if (!instant) showMinutesWait(); break;
+      case 'minutes_partial':   // 쓰이고 있는 회의록. 기록에는 남지 않고 지금 보는 화면에만 온다
+        showMinutes(ev.minutes, { partial: true });
+        follow();
+        break;
       case 'minutes':
         if (record) record.minutes = ev.minutes;
         if (!instant) { showMinutes(ev.minutes); follow(); }
@@ -553,7 +757,10 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       case 'summary': addSummary(ev); break;
       case 'end':
         hideMinutesWait();   // 회의록을 쓰지 못하고 끝난 경우에도 대기 카드를 남기지 않는다
+        if (minutesEl?.classList.contains('is-writing')) { minutesEl.remove(); minutesEl = null; }   // 쓰다가 실패한 회의록
         state = 'ended';
+        liveCard = null;
+        setClock(clock.base, true);
         phaseChip.querySelector('span')!.textContent = ev.state === 'aborted' ? '중단됨' : '토론 끝';
         if (speaking) setAvatar(seats.get(speaking)!.av, { state: 'listening' });
         speaking = null;
@@ -561,7 +768,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         seats.forEach((s) => { setAvatar(s.av, { wants: false }); s.tile.classList.remove('is-hot'); });
         paintBadges();
         paintControls();
-        if (!instant) showCost();
+        if (!instant) { showQa(); showCost(); follow(); }
         break;
       default: break;
     }
@@ -579,6 +786,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   }
 
   function paintControls(): void {
+    paintSeek();
     clear(controls);
     if (replaying) {
       controls.append(
@@ -586,14 +794,19 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
           icon(replayPaused ? Play : Pause, 18), replayPaused ? '이어 보기' : '멈춤'),
         segEl([['1', '1배'], ['2', '2배'], ['4', '4배']], String(replayRate), (v) => { replayRate = Number(v); paintControls(); }),
         h('button', { type: 'button', class: 'btn', onclick: () => showAll() }, icon(SkipForward, 18), '끝까지 보기'),
-        h('span', { class: 'muted small' }, '지난 토론을 같은 박자로 다시 보는 중'));
+        h('span', { class: 'muted small' }, '지난 토론을 같은 박자로 다시 보는 중. 위의 타임라인을 누르거나 끌어 원하는 발언으로 옮길 수 있습니다'));
       return;
     }
     if (state === 'ended' || !record?.live) {
-      controls.append(
-        h('button', { type: 'button', class: 'btn btn--primary', disabled: writingMinutes, onclick: () => writeMinutes() },
+      const canResume = !!record?.resumable && !record.live;
+      put(controls,
+        canResume ? h('button', { type: 'button', class: 'btn btn--primary', disabled: resuming, tip: '끊긴 곳 다음 발언부터 토론을 이어 갑니다', onclick: () => resumeDebate() },
+          icon(resuming ? LoaderCircle : StepForward, 18, resuming ? 'spin' : ''), resuming ? '이어 가는 중' : '이어 하기') : null,
+        h('button', { type: 'button', class: `btn${canResume ? '' : ' btn--primary'}`, disabled: writingMinutes, onclick: () => writeMinutes() },
           icon(writingMinutes ? LoaderCircle : FileText, 18, writingMinutes ? 'spin' : ''),
           writingMinutes ? '회의록을 쓰는 중' : record?.minutes ? '회의록 다시 쓰기' : '회의록 쓰기'),
+        h('button', { type: 'button', class: 'btn', disabled: judging, tip: '누가 더 설득력 있게 토론했는지 AI 심사위원의 평가를 받습니다', onclick: () => judge() },
+          icon(judging ? LoaderCircle : Scale, 18, judging ? 'spin' : ''), judging ? '판정하는 중' : record?.verdict ? '다시 판정' : '판정'),
         h('button', { type: 'button', class: 'btn', tip: '다른 프로그램에 붙여 넣을 수 있게 마크다운으로 복사합니다', onclick: () => copyAll() },
           icon(Copy, 18), '대화 + 회의록 복사'),
         h('div', { class: 'sep' }),
@@ -631,7 +844,13 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     hideMinutesWait();
     clear(inner);
     minutesEl = null;
+    verdictEl = null;
+    qaEl = null;
     costEl = null;
+    liveCard = null;
+    clock.base = 0;
+    clock.shown = 0;
+    paintClock();
     cards.clear();
     registry.clear();
     track.querySelectorAll('.tick').forEach((t) => t.remove());
@@ -642,7 +861,108 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     usage = null;
     state = 'running';
     clockTurn.textContent = '0';
-    clockTime.textContent = '00:00';
+  }
+
+  /** 토론 아래에 붙는 것들을 한꺼번에 그린다: 회의록, 판정, 묻고 답하기, 총 비용. */
+  function showTail(): void {
+    if (record?.minutes) showMinutes(record.minutes);
+    if (record?.verdict) showVerdict(record.verdict);
+    showQa();
+    showCost();
+  }
+
+  /* ---------- 타임라인: 눌러서, 끌어서 원하는 발언으로 ---------- */
+  function buildMarks(): Mark[] {
+    const out: Mark[] = [];
+    let from = 0;
+    let begin = -1;
+    let speaker = '';
+    (record?.events ?? []).forEach((ev, i) => {
+      if (ev.type === 'ready' && begin < 0) begin = i;
+      else if (ev.type === 'speech_start') { if (begin < 0) begin = i; speaker = ev.speaker; }
+      else if (ev.type === 'speech_end' && ev.failed) begin = -1;
+      else if (ev.type === 'clock' && begin >= 0) {
+        const to = Math.min(100, (ev.progress ?? 0) * 100);
+        out.push({ id: ev.turn, index: begin, from, to, name: seats.get(speaker)?.persona.name ?? '' });
+        from = to;
+        begin = -1;
+      }
+    });
+    return out;
+  }
+  const seekable = () => !!record && !record.live && marks.length > 0 && (replaying || state === 'ended');
+  const markAt = (pct: number) => marks.find((m) => pct <= m.to) ?? marks[marks.length - 1];
+  const pctOf = (e: PointerEvent) => {
+    const box = track.getBoundingClientRect();
+    return Math.max(0, Math.min(100, ((e.clientX - box.left) / Math.max(box.width, 1)) * 100));
+  };
+  let current = -1;   // 타임라인에서 마지막으로 고른 발언 (marks의 자리)
+  let dragging = false;
+
+  function previewMark(e: PointerEvent): void {
+    const pct = pctOf(e);
+    const mark = markAt(pct);
+    scrubTip.textContent = `#${mark.id} ${mark.name}`;
+    scrubTip.style.left = `${pct}%`;
+    scrubTip.classList.add('is-on');
+  }
+
+  /** 그 발언으로 간다. 다시 보는 중이면 거기서부터 다시 흐르고, 다 펼쳐 둔 화면이면 그 발언이 보이게 옮긴다. */
+  function goToMark(at: number): void {
+    const mark = marks[Math.max(0, Math.min(marks.length - 1, at))];
+    if (!mark || !record) return;
+    current = marks.indexOf(mark);
+    timeline.setAttribute('aria-valuenow', String(Math.round(mark.from)));
+    timeline.setAttribute('aria-valuetext', `#${mark.id} ${mark.name}`);
+    if (!replaying) {
+      const card = cards.get(mark.id)?.root;
+      if (!card) return;
+      card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      card.classList.remove('is-flash');
+      void card.offsetWidth;
+      card.classList.add('is-flash');
+      return;
+    }
+    window.clearTimeout(replayTimer);
+    reset();
+    for (let k = 0; k < mark.index; k += 1) handle(record.events[k], true);   // 그 앞까지는 한 번에 펼친다
+    replayIndex = mark.index;
+    stage.classList.remove('is-ended');
+    stage.classList.toggle('is-paused', replayPaused);
+    stick = true;
+    transcript.scrollTop = transcript.scrollHeight;
+    paintControls();
+    stepReplay();
+  }
+
+  timeline.addEventListener('pointerdown', (e) => {
+    if (!seekable() || e.button !== 0) return;
+    dragging = true;
+    timeline.setPointerCapture(e.pointerId);
+    previewMark(e);
+  });
+  timeline.addEventListener('pointermove', (e) => { if (seekable()) previewMark(e); });
+  timeline.addEventListener('pointerup', (e) => {
+    if (!dragging) return;
+    dragging = false;
+    if (seekable()) goToMark(marks.indexOf(markAt(pctOf(e))));
+  });
+  timeline.addEventListener('pointercancel', () => { dragging = false; scrubTip.classList.remove('is-on'); });
+  timeline.addEventListener('pointerleave', () => { if (!dragging) scrubTip.classList.remove('is-on'); });
+  timeline.addEventListener('keydown', (e) => {
+    if (!seekable() || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+    e.preventDefault();
+    let at = current;
+    if (replaying) at = marks.reduce((found, m, i) => (m.index <= replayIndex ? i : found), 0);
+    goToMark(at + (e.key === 'ArrowRight' ? 1 : -1));
+  });
+  function paintSeek(): void {
+    const on = seekable();
+    timeline.classList.toggle('is-seekable', on);
+    if (on) timeline.setAttribute('tabindex', '0');
+    else timeline.removeAttribute('tabindex');
+    timeline.dataset.tip = on ? (replaying ? '누르거나 끌어서 원하는 발언부터 다시 봅니다' : '눌러서 그 발언으로 갑니다') : '';
+    if (!on) scrubTip.classList.remove('is-on');
   }
 
   /** 저장된 기록의 비용을 읽는다 (회의록 비용 등 토론이 끝난 뒤에 더해진 것까지). */
@@ -662,9 +982,14 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     reset();
     for (const ev of record.events) handle(ev, true);
     state = 'ended';
+    liveCard = null;
+    if (record.resumable) {   // 끝까지 가지 못한 토론
+      phaseChip.querySelector('span')!.textContent = '끊김';
+      addNotice('warn', `토론이 #${record.speeches?.length ?? 0} 발언 뒤에 끊겼습니다. 아래의 '이어 하기'를 누르면 다음 발언부터 이어 갑니다.`);
+    }
     loadMoney();
-    if (record.minutes) showMinutes(record.minutes);
-    showCost();
+    showTail();
+    marks = buildMarks();
     paintBadges();
     paintControls();
     paintSide();
@@ -675,7 +1000,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   function stepReplay(): void {
     if (!record || disposed || !replaying || replayPaused) return;
     const events = record.events;
-    const finish = () => { replaying = false; state = 'ended'; loadMoney(); if (record?.minutes) showMinutes(record.minutes); showCost(); paintControls(); };
+    const finish = () => { replaying = false; state = 'ended'; liveCard = null; loadMoney(); showTail(); paintControls(); stage.classList.add('is-ended'); };
     if (replayIndex >= events.length) { finish(); return; }
     const ev = events[replayIndex];
     handle(ev, false);
@@ -689,6 +1014,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   function startReplay(): void {
     if (!record) return;
     reset();
+    marks = buildMarks();
     replaying = true;
     replayPaused = false;
     replayIndex = 0;
@@ -699,7 +1025,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   }
 
   /* ---------- 시작 ---------- */
-  (async () => {
+  async function boot(): Promise<void> {
     try {
       record = await api.debate(id);
     } catch (err) {
@@ -709,22 +1035,37 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     if (disposed) return;
     paintSide();
     if (!record.live) { showAll(); return; }
+    // 진행 중인 토론: 지금까지의 것은 한 번에 펼치고, 그 뒤부터 이어서 받는다 (새로고침이나 이어 하기 뒤에도 같다)
+    for (const ev of record.events) handle(ev, true);
+    lastIndex = record.events.length - 1;
+    transcript.scrollTop = transcript.scrollHeight;
     paintControls();
-    stream = new EventSource(`/api/debates/${id}/events`);
+    stream?.close();
+    stream = new EventSource(`/api/debates/${id}/events?since=${lastIndex + 1}`);
     stream.onmessage = (msg) => {
       const ev = JSON.parse(msg.data) as DebateEvent;
-      if (ev.i <= lastIndex) return;   // 다시 연결되면 처음부터 다시 오므로 본 것은 건너뛴다
-      lastIndex = ev.i;
-      record!.events[ev.i] = ev;
+      if (ev.i >= 0) {   // i가 -1인 것은 기록에 남지 않는 임시 이벤트(쓰이고 있는 회의록)
+        if (ev.i <= lastIndex) return;   // 다시 연결되면 앞의 것부터 다시 오므로 본 것은 건너뛴다
+        lastIndex = ev.i;
+        record!.events[ev.i] = ev;
+      }
       handle(ev, false);
       if (ev.type === 'end') {
         stream?.close();
         record!.live = false;
         paintControls();
-        api.debate(id).then((saved) => { if (!disposed) { record = saved; loadMoney(); showCost(); paintControls(); } }).catch(() => undefined);
+        api.debate(id).then((saved) => {
+          if (disposed) return;
+          record = saved;
+          marks = buildMarks();
+          loadMoney();
+          showCost();
+          paintControls();
+        }).catch(() => undefined);
       }
     };
-  })();
+  }
+  void boot();
 
   return () => {
     disposed = true;
@@ -732,5 +1073,6 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     observer.disconnect();
     window.clearTimeout(replayTimer);
     window.clearInterval(waitTimer);
+    window.clearInterval(clockTimer);
   };
 }

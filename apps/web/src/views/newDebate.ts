@@ -40,7 +40,7 @@ const draft = {
   hiddenAgenda: null as boolean | null,
 };
 
-/* 진행 설정은 이 브라우저에 기억해 두고 다음에 그대로 쓴다. 주제, 자료, 참가자는 기억하지 않는다. */
+/* 진행 설정은 이 브라우저에 기억해 두고 다음에 그대로 쓴다. 쓰던 초안(주제, 자료, 참가자)은 아래에서 따로 기억한다. */
 const SETTING_KEYS = ['count', 'policy', 'avatarSet', 'moderator', 'mode', 'turnsOn', 'maxTurns', 'minutesOn', 'maxMinutes',
   'length', 'speed', 'interjection', 'gapScale', 'search', 'maxSearches', 'model', 'effort', 'perSpeaker', 'badge', 'summary',
   'reactions', 'tone', 'hiddenAgenda'] as const;
@@ -50,7 +50,50 @@ const DEFAULTS = pick();
 
 function persist(): void {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(pick())); } catch { /* 저장이 막혀 있어도 화면은 그대로 쓴다 */ }
+  saveDraft();
 }
+
+/* 쓰던 초안도 이 브라우저에 기억한다: 주제, 컨셉, 자료, 웹 주소, 만들어 둔 참가자, 그때까지 든 준비 비용.
+   새로고침하거나 서버를 다시 켜도 남는다. 참가자를 만드는 데 든 비용을 다시 쓰지 않게 하려는 것이다. */
+const DRAFT_KEY = 'aitalk.draft.v1';
+let draftTimer = 0;
+let droppedMaterials = 0;   // 지난번에 너무 커서 기억하지 못한 자료의 수. 화면을 열 때 한 번 알린다
+
+function saveDraftNow(): void {
+  window.clearTimeout(draftTimer);
+  const body = { topic: draft.topic, concept: draft.concept, urls: draft.urls, cast: draft.cast, prepCost: draft.prepCost };
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...body, materials: draft.materials }));
+  } catch {   // 자료가 커서 저장 한도를 넘으면 자료만 빼고 기억한다
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...body, materials: [], dropped: draft.materials.length })); } catch { /* 저장이 막혀 있으면 기억하지 않는다 */ }
+  }
+}
+
+function saveDraft(): void {
+  window.clearTimeout(draftTimer);
+  draftTimer = window.setTimeout(saveDraftNow, 400);
+}
+
+function restoreDraft(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null');
+    if (!saved || typeof saved !== 'object') return;
+    if (typeof saved.topic === 'string') draft.topic = saved.topic;
+    if (typeof saved.concept === 'string') draft.concept = saved.concept;
+    if (Array.isArray(saved.urls)) draft.urls = saved.urls.filter((u: unknown) => typeof u === 'string');
+    if (Array.isArray(saved.materials)) {
+      draft.materials = saved.materials.filter((m: any) => m && typeof m.name === 'string' && typeof m.text === 'string')
+        .map((m: any) => ({ name: m.name, text: m.text, chars: Number(m.chars) || m.text.length, tokens: Number(m.tokens) || 0 }));
+    }
+    if (Array.isArray(saved.cast)) {
+      draft.cast = saved.cast.slice(0, 10).map((p: any) => (p && typeof p.name === 'string' && p.name && p.avatar && Array.isArray(p.claims) ? p as Slot : null));
+    }
+    if (typeof saved.prepCost === 'number' && saved.prepCost > 0) draft.prepCost = saved.prepCost;
+    droppedMaterials = Number(saved.dropped) || 0;
+  } catch { /* 깨진 값은 무시한다 */ }
+}
+restoreDraft();
+window.addEventListener('pagehide', saveDraftNow);
 
 function restore(): void {
   try {
@@ -125,7 +168,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   topic.value = draft.topic;
   const concept = h('textarea', {
     class: 'concept-input', rows: 2, placeholder: '예) 심야 라디오 토론. 진행자는 느긋하고, 참가자들은 서로를 잘 아는 오랜 논객들이다.',
-    oninput: () => { draft.concept = concept.value; },
+    oninput: () => { draft.concept = concept.value; saveDraft(); },
   });
   concept.value = draft.concept;
   put(page,
@@ -140,7 +183,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       h('div', { class: 'concept-label' }, icon(Drama, 18), '컨셉과 분위기', h('small', null, '선택. 어떤 자리인지, 어떤 분위기인지. 주제에 못 적은 배경이나 바라는 점도 좋습니다. 참가자 모두에게 똑같이 적용됩니다')),
       concept,
       h('div', { class: 'topic-foot' }, h('span', { class: 'muted small' }, '예시'),
-        CONCEPTS.map((text) => h('button', { type: 'button', class: 'chip', onclick: () => { concept.value = text; draft.concept = text; concept.focus(); } }, text)))),
+        CONCEPTS.map((text) => h('button', { type: 'button', class: 'chip', onclick: () => { concept.value = text; draft.concept = text; saveDraft(); concept.focus(); } }, text)))),
   );
 
   /* ---- 자료 ---- */
@@ -196,6 +239,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     draft.urls.forEach((u, i) => matList.append(h('div', { class: 'mat-item' }, icon(Globe, 18),
       h('span', { class: 'name' }, u), h('span', { class: 'muted small' }, '시작할 때 진행자가 조사합니다'),
       deleteButton(() => { draft.urls.splice(i, 1); paintMaterials(); }))));
+    saveDraft();
   }
   page.append(h('section', { class: 'block' },
     h('h2', { class: 'block-title' }, '자료', h('small', null, '선택. 문서를 올리거나, 웹 주소를 붙이거나, 글을 붙여 넣으면 그것을 놓고 토론합니다')),
@@ -660,6 +704,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         prep_cost: draft.prepCost,
       });
       draft.prepCost = 0;
+      saveDraftNow();
       ctx.go(`#/stage/${id}`);
     } catch (err) {
       toast((err as Error).message, 'error');
@@ -670,6 +715,10 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   }
 
   setCount(draft.count);
+  if (droppedMaterials) {
+    toast(`올려 두었던 자료 ${droppedMaterials}개는 너무 커서 기억하지 못했습니다. 다시 올려 주세요.`, 'error');
+    droppedMaterials = 0;
+  }
   api.personas().then((list) => { library = list; }).catch(() => undefined);
   return () => { document.removeEventListener('click', onDocClick); closeMenu(); };
 }

@@ -121,6 +121,12 @@ class _Run:
     seen: set = field(default_factory=set)
 
 
+def _text_only(on_event: Optional[OnEvent]) -> OnEvent:
+    if on_event is None:
+        return lambda *_: None
+    return lambda kind, payload: on_event(kind, payload) if kind == "text" else None
+
+
 class PgptProvider(Provider):
     name = "pgpt"
     default_model = "gpt-6-luna"
@@ -156,7 +162,8 @@ class PgptProvider(Provider):
         if "Connection" in name or "Timeout" in name:
             return ProviderError("P-GPT 서버에 연결하지 못했습니다. 회사 OA망에서만 쓸 수 있습니다.")
         if "Authentication" in name or getattr(exc, "status_code", 0) == 401:
-            return ProviderError("P-GPT 인증에 실패했습니다. " + NOT_CONFIGURED.replace("가 없습니다.", "를 확인하세요."))
+            return ProviderError("P-GPT 인증에 실패했습니다. " + NOT_CONFIGURED.replace("가 없습니다.", "를 확인하세요."),
+                                 retry=False)
         return ProviderError(f"P-GPT 호출 실패: {name}: {scrub(str(exc), self._secrets)[:300]}")
 
     async def list_models(self) -> list[ModelInfo]:
@@ -341,12 +348,20 @@ class PgptProvider(Provider):
         return PgptContext(self, shared, search, compact_threshold, max_searches)
 
     async def generate_json(self, *, system: str, prompt: str, schema: dict,
-                            model: str, effort: str) -> tuple[dict, Usage]:
+                            model: str, effort: str,
+                            on_event: Optional[OnEvent] = None) -> tuple[dict, Usage]:
         kw = self._base(model=model, effort=effort, store=False, search=False, schema=schema)
         kw["input"] = [{"role": "developer", "content": system},
                        {"role": "user", "content": prompt + "\n\n정해진 JSON 형식으로만 답하세요."}]
-        speech, _ = await self._run(lambda *_: None, kw)
+        speech, _ = await self._run(_text_only(on_event), kw)
         return parse_json(speech.text), speech.usage
+
+    async def stream_text(self, *, system: str, prompt: str, model: str, effort: str,
+                          on_event: OnEvent) -> tuple[str, Usage]:
+        kw = self._base(model=model, effort=effort, store=False, search=False)
+        kw["input"] = [{"role": "developer", "content": system}, {"role": "user", "content": prompt}]
+        speech, _ = await self._run(_text_only(on_event), kw)
+        return speech.text.strip(), speech.usage
 
     async def generate_text(self, *, system: str, prompt: str, model: str,
                             effort: str) -> tuple[str, Usage]:
@@ -509,10 +524,11 @@ class PgptContext(Context):
         self.pending.append({"role": "user", "content": f"【{speaker}】 {text}"})
 
     async def judge(self, *, question: str, schema: dict, model: str,
-                    effort: str) -> tuple[dict, Usage]:
+                    effort: str, on_event: Optional[OnEvent] = None) -> tuple[dict, Usage]:
         # 곁가지: 저장하지 않고 검색 도구도 넣지 않는다. 판단 내용이 토론 줄기에 남지 않는다.
         # 먼저 틀 없이 부르고, 안 읽히면 틀을 걸어 다시 부른다.
-        speech, _ = await self._call(lambda *_: None, question, model=model, effort=effort,
+        # on_event를 주면(회의록) 만들어지는 글을 그대로 흘려보낸다.
+        speech, _ = await self._call(_text_only(on_event), question, model=model, effort=effort,
                                      store=False, search=False)
         usage = speech.usage
         try:
@@ -524,7 +540,9 @@ class PgptContext(Context):
         tail = question
         if not self.p.use_schema:
             tail += "\n\n다음 JSON 형식으로만 답하세요:\n" + json.dumps(schema, ensure_ascii=False)
-        speech, _ = await self._call(lambda *_: None, tail, model=model, effort=effort,
+        if on_event:
+            on_event("reset", None)
+        speech, _ = await self._call(_text_only(on_event), tail, model=model, effort=effort,
                                      store=False, search=False, schema=schema)
         usage.add(speech.usage)
         return parse_json(speech.text), usage

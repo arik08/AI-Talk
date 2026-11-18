@@ -6,7 +6,7 @@ import { copyText, recordToMarkdown } from '../export';
 import type { DebateSummary } from '../types';
 import { clear, deleteButton, fmtCost, fmtTime, h, icon, safeColor, toast } from '../ui/dom';
 
-const STATE: Record<string, string> = { ended: '끝남', running: '진행 중', paused: '멈춤', error: '오류로 멈춤', aborted: '중단됨', failed: '실패' };
+const STATE: Record<string, string> = { ended: '끝남', running: '진행 중', paused: '멈춤', error: '오류로 멈춤', aborted: '중단됨', failed: '실패', interrupted: '끊김 · 이어 할 수 있음' };
 
 export function mountHistory(root: HTMLElement, ctx: AppContext): () => void {
   const list = h('div', { class: 'hist' });

@@ -603,3 +603,40 @@ code { font-family: Consolas, "D2Coding", monospace; font-size: .9375rem; color:
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+/* ---------- 쓰이는 대로 보이는 회의록·판정, 묻고 답하기 ---------- */
+/* 쓰이는 동안 초당 몇 번씩 다시 그리므로, 안쪽 항목의 등장 움직임은 끈다 (카드 자체는 처음 한 번만 떠오른다) */
+.minutes li, .minutes .issue { animation: none; }
+.minutes.is-writing { border-style: dashed; }
+.costcard.is-redraw { animation: none; }
+.verdict-head { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.verdict-head .ico { color: var(--gold-hi); }
+.verdict-head span { color: var(--ct, var(--c, var(--gold-hi))); }
+.verdict-who { display: grid; grid-template-columns: 9rem minmax(0, 1fr) 3.5rem; align-items: center; gap: .875rem; }
+.verdict-who b { color: var(--ct, var(--c, var(--text))); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.verdict-bar { height: .375rem; border-radius: 1rem; background: var(--track); overflow: hidden; }
+.verdict-bar i { display: block; height: 100%; border-radius: inherit; background: var(--c, var(--gold)); transition: width .4s var(--ease); }
+.verdict-score { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
+.verdict-row .issue-pos span:nth-child(odd) { color: var(--dim); font-weight: 400; }
+.takeaway small { display: block; margin-bottom: .25rem; font-family: var(--font-body); font-size: .8125rem; letter-spacing: .04em; color: var(--muted); }
+
+.qa-note { font-size: .9375rem; }
+.qa-list { display: flex; flex-direction: column; margin-top: .5rem; }
+.qa-item { padding: 1rem 0; border-top: 1px solid var(--line); }
+.qa-q { color: var(--gold-hi); font-weight: 500; line-height: 1.7; }
+.qa-q::before { content: "Q"; margin-right: .625rem; font-family: var(--font-head); color: var(--gold); }
+.qa-a { margin-top: .5rem; color: var(--text); line-height: 1.75; white-space: pre-wrap; }
+.qa-hints { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .875rem; }
+.qa-hints:empty { display: none; }
+.qa-form { display: flex; align-items: center; gap: .5rem; margin-top: .875rem; }
+.qa-form .input { flex: 1; min-width: 0; }
+
+/* ---------- 타임라인: 눌러서, 끌어서 옮기기 ---------- */
+.timeline.is-seekable { cursor: pointer; touch-action: none; }
+.timeline.is-seekable:hover .track, .timeline.is-seekable:focus-visible .track { height: 6px; }
+.timeline:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+.scrub-tip { position: absolute; bottom: calc(100% + .25rem); transform: translateX(-50%); padding: .25rem .625rem; border: 1px solid var(--line-hi); border-radius: var(--r); background: var(--panel); color: var(--text); font-size: .8125rem; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity var(--fast) var(--ease); z-index: 3; }
+.scrub-tip.is-on { opacity: 1; }
+.sp.is-flash { animation: sp-flash 1.2s var(--ease); }
+@keyframes sp-flash { 0%, 40% { background: rgb(var(--gold-rgb) / .12); } 100% { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .sp.is-flash { animation: none; outline: 1px solid var(--gold-lo); } }

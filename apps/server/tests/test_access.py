@@ -1,5 +1,7 @@
-"""다른 PC에서 들어올 때의 접속 코드 확인과, 회의록 API를 본다."""
+"""다른 PC에서 들어올 때의 접속 코드 확인과, 끝난 토론에 대한 API(회의록, 판정, 묻고 답하기, 이어 하기)를 본다."""
+import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -20,6 +22,24 @@ def _client(monkeypatch, tmp_path, code=""):
     return TestClient(app_module.app)   # 시험용 클라이언트의 주소는 127.0.0.1이 아니므로 "다른 PC"로 취급된다
 
 
+def _lines(res):
+    """흘려보낸 응답의 줄들. 마지막 줄이 결과(done)다."""
+    assert res.status_code == 200, res.text
+    rows = [json.loads(line) for line in res.text.splitlines() if line.strip()]
+    assert rows[-1]["type"] == "done", rows[-1]
+    return rows
+
+
+def _ended(debate_id="d_min"):
+    store.save_debate({
+        "id": debate_id, "created": "2026-11-17T10:00:00", "state": "ended", "turns": 2, "seconds": 30, "provider": "mock",
+        "moderator": None,
+        "config": {"topic": "시험 주제", "model": "mock-large", "effort": "low",
+                   "participants": [{"name": "가온", "title": "찬성"}, {"name": "나래", "title": "반대"}]},
+        "speeches": [{"id": 1, "name": "가온", "text": "저는 찬성합니다."}, {"id": 2, "name": "나래", "text": "저는 반대합니다."}],
+        "events": []})
+
+
 def test_without_code_everyone_gets_in(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     assert client.get("/api/personas").status_code == 200
@@ -36,20 +56,16 @@ def test_with_code_other_pcs_must_enter_it(monkeypatch, tmp_path):
 
 def test_minutes_are_written_and_saved_with_the_record(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
-    store.save_debate({
-        "id": "d_min", "created": "2026-11-17T10:00:00", "state": "ended", "turns": 2, "seconds": 30, "provider": "mock",
-        "moderator": None,
-        "config": {"topic": "시험 주제", "model": "mock-large", "effort": "low",
-                   "participants": [{"name": "가온", "title": "찬성"}, {"name": "나래", "title": "반대"}]},
-        "speeches": [{"id": 1, "name": "가온", "text": "저는 찬성합니다."}, {"id": 2, "name": "나래", "text": "저는 반대합니다."}],
-        "events": []})
-    res = client.post("/api/debates/d_min/minutes")
-    assert res.status_code == 200
-    body = res.json()
+    monkeypatch.setattr(app_module, "get_provider", lambda: MockProvider(latency=0.3, seed=1))   # 쓰는 데 시간이 걸린다
+    _ended()
+    rows = _lines(client.post("/api/debates/d_min/minutes"))
+    body = rows[-1]
     minutes = body["minutes"]
     assert minutes["title"] and minutes["discussions"]
+    partial = [r["minutes"] for r in rows if r["type"] == "partial"]       # 쓰이는 대로 흘러나온다
+    assert partial and partial[0].get("title") == minutes["title"] and "conclusion" not in partial[0]
     assert body["cost"] > 0 and body["cost_parts"]["minutes"] > 0      # 회의록을 쓰는 비용이 총 비용에 더해진다
-    again = client.post("/api/debates/d_min/minutes").json()
+    again = _lines(client.post("/api/debates/d_min/minutes"))[-1]
     assert again["cost_parts"]["minutes"] > body["cost_parts"]["minutes"]  # 다시 쓰면 더 쌓인다
     assert store.load_debate("d_min")["minutes"]["title"] == minutes["title"]
     assert client.post("/api/debates/d_none/minutes").status_code == 404
@@ -116,3 +132,80 @@ def test_library_picks_ignore_unknown_and_duplicate_ids_and_fill_up():
     assert "[p3] 인물3" in text and "남은 2자리" in text
     text = prompts.pick_prompt("주제", 2, "auto", library)
     assert "- [p0] 인물0" in text and "참가자 2명" in text
+
+
+def test_verdict_ranks_every_participant_and_is_saved(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _ended()
+    body = _lines(client.post("/api/debates/d_min/verdict"))[-1]
+    verdict = body["verdict"]
+    assert [r["name"] for r in verdict["ranking"]] == ["가온", "나래"]           # 참가자 전원, 점수가 높은 순서
+    assert verdict["ranking"][0]["score"] >= verdict["ranking"][1]["score"]
+    assert verdict["winner"] == "가온" and verdict["summary"]
+    assert body["cost_parts"]["extra"] > 0
+    assert store.load_debate("d_min")["verdict"]["winner"] == "가온"
+    assert client.post("/api/debates/d_none/verdict").status_code == 404
+
+
+def test_questions_about_a_finished_debate_are_answered_and_kept(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _ended()
+    rows = _lines(client.post("/api/debates/d_min/ask", json={"question": "누가 더 설득력 있었어?"}))
+    answer = "".join(r["text"] for r in rows if r["type"] == "delta")
+    assert rows[-1]["qa"] == [{**rows[-1]["qa"][0], "q": "누가 더 설득력 있었어?", "a": answer.strip()}]
+    assert "누가 더 설득력 있었어?" in answer                                   # 시험용 답변은 질문을 되짚는다
+    second = _lines(client.post("/api/debates/d_min/ask", json={"question": "비용 얘기는?"}))[-1]
+    assert [item["q"] for item in second["qa"]] == ["누가 더 설득력 있었어?", "비용 얘기는?"]
+    assert second["cost_parts"]["extra"] > rows[-1]["cost_parts"]["extra"]
+    assert len(store.load_debate("d_min")["qa"]) == 2
+    assert client.post("/api/debates/d_min/ask", json={"question": "  "}).status_code == 400
+
+
+def test_analyst_is_told_it_is_not_a_participant():
+    from aitalk import prompts
+    speeches = [{"id": 1, "name": "가온", "text": "찬성합니다.", "at": 0}]
+    context = prompts.analyst_context("시험 주제", ["가온(찬성)"], speeches, {"overview": "요지"}, None)
+    assert "참가자가 아닙니다" in context and "【#1 · 00:00 · 가온】 찬성합니다." in context and "요지" in context
+    prompt = prompts.analyst_prompt([{"q": "앞 질문", "a": "앞 답"}], "새 질문")
+    assert prompt.index("앞 질문") < prompt.index("앞 답") < prompt.index("질문: 새 질문")
+
+
+def test_interrupted_debate_is_listed_as_such_and_can_be_resumed(monkeypatch, tmp_path):
+    """서버가 꺼지며 끊긴 토론은 '진행 중'이 아니라 끊긴 것으로 보이고, 이어 하기로 끝까지 간다."""
+    import asyncio
+
+    from aitalk.engine import Debate
+
+    client = _client(monkeypatch, tmp_path)
+    provider = MockProvider(latency=0, seed=2)
+    monkeypatch.setattr(app_module, "get_provider", lambda: provider)
+    monkeypatch.setattr(app_module, "LIVE", {})
+    people = [{"id": f"s{i}", "name": n, "title": "시험 인물", "viewpoint": "찬성", "claims": ["핵심입니다"], "hidden": "속내"}
+              for i, n in enumerate(["가온", "나래"], 1)]
+    cfg = {"topic": "시험 주제", "participants": people, "moderator": True, "mode": "mixed", "max_turns": 10,
+           "max_minutes": None, "length": "normal", "speed": "instant", "gap_scale": 0, "search": "off",
+           "model": "mock-large", "effort": "low", "summary": True, "seed": 7,
+           "materials": [{"name": "자료", "text": "비밀 자료 전문"}]}
+    saves = []
+    real_save = store.save_debate
+    monkeypatch.setattr(store, "save_debate", lambda rec: saves.append(json.loads(json.dumps(rec, ensure_ascii=False))))
+    asyncio.run(Debate("d_cut", cfg, provider).run())
+    monkeypatch.setattr(store, "save_debate", real_save)
+    store.save_debate(next(rec for rec in saves if len(rec["speeches"]) == 4))   # 네 번째 발언 뒤에 서버가 꺼졌다
+
+    assert client.get("/api/debates").json()[0]["state"] == "interrupted"
+    seen = client.get("/api/debates/d_cut").json()
+    assert seen["state"] == "interrupted" and seen["resumable"] and not seen["live"]
+    assert seen["resume"] is None and "비밀 자료 전문" not in json.dumps(seen, ensure_ascii=False)   # 화면으로는 보내지 않는다
+    with client:   # 서버의 이벤트 루프가 도는 동안 이어 하기를 끝까지 지켜본다
+        assert client.post("/api/debates/d_cut/resume").json() == {"id": "d_cut"}
+        for _ in range(400):
+            if store.load_debate("d_cut")["state"] == "ended":
+                break
+            time.sleep(0.02)
+    done = store.load_debate("d_cut")
+    assert done["state"] == "ended" and len(done["speeches"]) > 4 and done["speeches"][-1]["kind"] == "wrap"
+    after = client.get("/api/debates/d_cut").json()
+    assert after["state"] == "ended" and not after["resumable"]
+    _ended("d_done")
+    assert client.post("/api/debates/d_done/resume").status_code == 400            # 끝난 토론은 이어 갈 수 없다
