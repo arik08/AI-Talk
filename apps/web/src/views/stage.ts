@@ -188,9 +188,13 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       const urge = h('i');
       const status = h('div', { class: 'tile-status' });
       const badge = h('div', { class: 'tile-badge' }, p.id === 'moderator' ? '' : modelLabel(p.model || config.model, p.effort || config.effort));
-      const tile = h('div', { class: 'tile', style: `--c:${color}` }, av,
+      // 인물 위에 마우스를 올리면 그 사람이 누구인지 보여 준다. 숨은 의도(hidden)는 넣지 않는다
+      const about = [[p.name, p.title].filter(Boolean).join(' · '),
+        ...([['분야', p.expertise], ['입장', p.viewpoint], ['성격', p.personality], ['말투', p.speech]] as const)
+          .filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`)].join('\n');
+      const tile = h('div', { class: 'tile', style: `--c:${color}`, tip: about, 'data-tip-side': 'left' }, av,
         h('div', { class: 'tile-info' },
-          h('div', { class: 'tile-name' }, p.name), h('div', { class: 'tile-sub', tip: p.title }, p.title),
+          h('div', { class: 'tile-name' }, p.name), h('div', { class: 'tile-sub' }, p.title),
           p.id === 'moderator' ? null : h('div', { class: 'urge', tip: '지금 말하고 싶은 정도' }, urge),
           h('div', { class: 'tile-foot' }, status, badge)));
       cast.append(tile);

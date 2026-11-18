@@ -71,6 +71,10 @@ function showTip(target: HTMLElement): void {
   left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8));
   let top = rect.top - box.height - 8;
   if (top < 8) top = rect.bottom + 8;
+  if (target.dataset.tipSide === 'left' && rect.left - box.width - 8 >= 8) {   // 긴 설명은 옆에 띄워 위아래 이웃을 가리지 않는다
+    left = rect.left - box.width - 8;
+    top = Math.max(8, Math.min(rect.top, window.innerHeight - box.height - 8));
+  }
   tipEl.style.left = `${left}px`;
   tipEl.style.top = `${top}px`;
 }
