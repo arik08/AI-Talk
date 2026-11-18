@@ -95,6 +95,10 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   let speaking: string | null = null;
   let spotHot = false;
   let lastSpeech: { speaker: string; cut: boolean } | null = null;
+  // 통계: 발언마다 누가, 누구에게, 어떤 뜻과 감정으로, 얼마나 말했는지 적어 둔다. 다시 보기에서도 같은 길로 쌓인다
+  interface Said { speaker: string; kind: string; intent: string; target: string; mood: string; interject: boolean; cut: boolean; chars: number; done: boolean }
+  const said = new Map<number, Said>();
+  const searched = new Map<string, number>();
   let state = 'running';
   let badgeMode = 'on';
   let speed = 'normal';
@@ -132,7 +136,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   const clockTurn = h('b', null, '0');
   const clockTime = h('b', null, '00:00');
   const clockCost = h('b', null, '0원');
-  const sideBtn = h('button', { type: 'button', class: 'btn btn--icon', tip: '자료·출처·사용량 패널', 'aria-label': '옆 패널 열고 닫기' }, icon(BookOpen, 18));
+  const sideBtn = h('button', { type: 'button', class: 'btn btn--icon', tip: '통계·사용량·출처·자료 패널', 'aria-label': '옆 패널 열고 닫기' }, icon(BookOpen, 18));
   const cast = h('aside', { class: 'cast', 'aria-label': '참가자' });
   const spotlight = h('div', { class: 'spotlight' });
   const inner = h('div', { class: 'transcript-inner' });
@@ -227,14 +231,15 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   }, 200);
 
   /* ---------- 옆 패널 ---------- */
-  let tab: 'usage' | 'sources' | 'materials' = 'usage';
+  let tab: 'stats' | 'usage' | 'sources' | 'materials' = 'stats';
   let usage: any = null;
   let briefing = '';
   function paintSide(): void {
     clear(tabs);
-    ([['usage', '사용량'], ['sources', '출처'], ['materials', '자료']] as const).forEach(([key, label]) =>
+    ([['stats', '통계'], ['usage', '사용량'], ['sources', '출처'], ['materials', '자료']] as const).forEach(([key, label]) =>
       tabs.append(h('button', { type: 'button', class: tab === key ? 'is-on' : '', onclick: () => { tab = key; paintSide(); } }, label)));
     clear(sideBody);
+    if (tab === 'stats') { paintStats(); return; }
     if (tab === 'usage') {
       if (!usage) { sideBody.append(h('p', { class: 'muted' }, '아직 사용량이 없습니다.')); return; }
       const t = usage.total;
@@ -280,6 +285,77 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       }
     }
   }
+
+  /** 통계 탭: 누가 얼마나 말했는지, 누가 누구에게 말했는지, 어떤 발언이 많았는지. 끝난 발언만 센다. */
+  function paintStats(): void {
+    const rows = [...said.values()].filter((s) => s.done);
+    const talk = rows.filter((s) => s.speaker !== 'moderator');
+    if (!talk.length) { sideBody.append(h('p', { class: 'muted' }, '아직 끝난 발언이 없습니다.')); return; }
+    const nameOf = (id: string) => seats.get(id)?.persona.name ?? id;
+    const colorOf = (id: string) => safeColor(seats.get(id)?.persona.color);
+    const top = (counts: Map<string, number>) => [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const count = <K,>(items: K[]) => items.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map<K, number>());
+    const kindOf = (s: Said) => (s.kind === 'free' ? s.intent : s.kind);
+
+    // 1. 발언 횟수와 분량
+    const people = [...seats.keys()].filter((id) => id !== 'moderator').map((id) => {
+      const mine = talk.filter((s) => s.speaker === id);
+      const free = mine.filter((s) => s.kind === 'free');
+      return { id, turns: mine.length, chars: mine.reduce((a, s) => a + s.chars, 0),
+        intent: top(count(free.map((s) => s.intent))), mood: top(count(mine.map((s) => s.mood).filter((m) => m && m !== 'calm'))) };
+    });
+    const maxChars = Math.max(1, ...people.map((p) => p.chars));
+    const totalChars = Math.max(1, people.reduce((a, p) => a + p.chars, 0));
+    sideBody.append(h('h4', null, '발언 횟수와 분량'), h('div', { class: 'stat-list' }, people.map((p) =>
+      h('div', { class: 'stat-row', style: `--c:${colorOf(p.id)}` },
+        h('div', { class: 'stat-head' }, h('b', null, nameOf(p.id)),
+          h('span', null, `${p.turns}회 · ${p.chars.toLocaleString()}자 · ${Math.round((p.chars / totalChars) * 100)}%`)),
+        h('div', { class: 'stat-bar' }, h('i', { style: `width:${(p.chars / maxChars) * 100}%` })),
+        p.intent || p.mood ? h('div', { class: 'stat-sub' },
+          [p.intent ? `주로 ${INTENT_LABEL[p.intent[0]] ?? p.intent[0]}` : '', p.mood ? `자주 ${MOOD_LABEL[p.mood[0] as Mood] ?? p.mood[0]}` : ''].filter(Boolean).join(' · ')) : null))));
+
+    // 2. 눈에 띄는 기록
+    const longest = [...said.entries()].filter(([, s]) => s.done && s.speaker !== 'moderator').sort((a, b) => b[1].chars - a[1].chars)[0];
+    const most = (pick: (s: Said) => boolean) => top(count(talk.filter(pick).map((s) => s.speaker)));
+    const marks: [string, string][] = [];
+    const add = (label: string, hit: [string, number] | undefined, unit = '번') => { if (hit) marks.push([label, `${nameOf(hit[0])} · ${hit[1]}${unit}`]); };
+    add('가장 많이 말한 사람', [...people].sort((a, b) => b.turns - a.turns || b.chars - a.chars).map((p) => [p.id, p.turns] as [string, number])[0], '회');
+    add('가장 많이 반박한 사람', most((s) => s.kind === 'free' && s.intent === 'rebut'));
+    add('가장 많이 물은 사람', most((s) => s.kind === 'free' && s.intent === 'ask'));
+    add('가장 많이 수긍한 사람', most((s) => s.kind === 'free' && s.intent === 'agree'));
+    add('가장 많이 지목된 사람', top(count(talk.map((s) => s.target).filter((t) => t && seats.has(t)))));
+    add('가장 자주 격앙된 사람', most((s) => s.mood === 'heated'));
+    add('끼어든 사람', most((s) => s.interject));
+    add('말이 끊긴 사람', most((s) => s.cut));
+    add('가장 많이 검색한 사람', top(searched), '건');
+    if (longest) marks.push(['가장 긴 발언', `#${longest[0]} ${nameOf(longest[1].speaker)} · ${longest[1].chars.toLocaleString()}자`]);
+    sideBody.append(h('h4', { style: 'margin-top:1.25rem' }, '눈에 띄는 기록'),
+      h('div', { class: 'kv' }, marks.flatMap(([k, v]) => [h('span', null, k), h('span', null, v)])));
+
+    // 3. 누가 누구에게
+    const pairs = [...count(talk.filter((s) => s.target && seats.has(s.target) && s.target !== s.speaker).map((s) => `${s.speaker}|${s.target}`)).entries()]
+      .sort((a, b) => b[1] - a[1]).slice(0, 6);
+    if (pairs.length) {
+      sideBody.append(h('h4', { style: 'margin-top:1.25rem' }, '누가 누구에게'), h('div', { class: 'stat-pairs' }, pairs.map(([key, n]) => {
+        const [from, to] = key.split('|');
+        const kinds = [...count(talk.filter((s) => s.speaker === from && s.target === to).map(kindOf)).entries()].sort((a, b) => b[1] - a[1])
+          .map(([k, c]) => `${INTENT_LABEL[k] ?? k} ${c}`).join(' · ');
+        return h('div', { class: 'stat-pair' },
+          h('div', null, h('b', { style: `color:${colorOf(from)}` }, nameOf(from)), h('span', { class: 'stat-arrow', 'aria-label': '에게' }, '→'),
+            h('b', { style: `color:${colorOf(to)}` }, nameOf(to)), h('span', { class: 'stat-n' }, `${n}번`)),
+          h('div', { class: 'stat-sub' }, kinds));
+      })));
+    }
+
+    // 4. 발언의 성격
+    const kinds = [...count(talk.filter((s) => s.kind === 'free').map((s) => s.intent)).entries()].sort((a, b) => b[1] - a[1]);
+    const moods = [...count(talk.map((s) => s.mood).filter(Boolean)).entries()].sort((a, b) => b[1] - a[1]);
+    if (kinds.length) sideBody.append(h('h4', { style: 'margin-top:1.25rem' }, '자유토론 발언의 성격'),
+      h('div', { class: 'stat-chips' }, kinds.map(([k, n]) => h('span', { class: 'chip' }, `${INTENT_LABEL[k] ?? k} ${n}`))));
+    if (moods.length) sideBody.append(h('h4', { style: 'margin-top:1.25rem' }, '발언할 때의 감정'),
+      h('div', { class: 'stat-chips' }, moods.map(([m, n]) => h('span', { class: 'chip' }, `${MOOD_LABEL[m as Mood] ?? m} ${n}`))));
+  }
+  const refreshStats = () => { if (tab === 'stats' && !side.classList.contains('is-closed')) paintSide(); };
 
   /* ---------- 참가자 자리 ---------- */
   function modelLabel(modelId: string, effort: string): string {
@@ -378,6 +454,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const prev = speaking;
     if (prev && prev !== ev.speaker) setAvatar(seats.get(prev)!.av, { state: lastSpeech?.cut ? 'cut' : 'listening' });
     speaking = ev.speaker;
+    said.set(ev.id, { speaker: ev.speaker, kind: String(ev.kind ?? ''), intent: String(ev.intent ?? ''), target: String(ev.target ?? ''),
+      mood: String(ev.mood ?? ''), interject: !!ev.interject, cut: false, chars: 0, done: false });
     setAvatar(seat.av, { state: 'speaking', mood: (ev.mood as Mood) || 'calm', wants: false });
     seat.tile.classList.remove('is-hot');
     setStatus(ev.speaker, null);
@@ -433,12 +511,14 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const card = cards.get(ev.id);
     if (!card) return;
     if (liveCard === card) liveCard = null;
-    if (ev.failed) { card.root.remove(); cards.delete(ev.id); return; }
+    if (ev.failed) { card.root.remove(); cards.delete(ev.id); said.delete(ev.id); return; }
     card.root.classList.remove('is-live');
     setAvatar(card.av, { state: ev.cut ? 'cut' : 'listening' });   // 말이 끝나면 그 감정으로 듣는 자세가 된다
     card.cut = !!ev.cut;
     lastSpeech = { speaker: card.speaker, cut: !!ev.cut };
     const plain = ev.cut ? String(ev.text).replace(/\s*—$/, '') : String(ev.text);
+    const note = said.get(ev.id);
+    if (note) { note.chars = Array.from(plain).length; note.cut = !!ev.cut; note.done = true; refreshStats(); }
     // 출처는 여기서 바로 번호표에 올린다 (다시 볼 때도 같은 순서로 올라가 번호가 같다)
     const cited = collectSources(plain, ev.sources, registry);
     const toggle = cited.length ? sourceToggle(cited, registry) : null;
@@ -834,6 +914,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       case 'speech_start': startSpeech(ev); break;
       case 'delta': addDelta(ev, instant); break;
       case 'search': {
+        searched.set(ev.speaker, (searched.get(ev.speaker) ?? 0) + 1);
         setStatus(ev.speaker, Search, String(ev.query).slice(0, 14));
         window.setTimeout(() => setStatus(ev.speaker, null), 4000);
         break;
@@ -980,6 +1061,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     clock.shown = 0;
     paintClock();
     cards.clear();
+    said.clear();
+    searched.clear();
     registry.clear();
     track.querySelectorAll('.tick').forEach((t) => t.remove());
     fill.style.width = '0%';

@@ -579,6 +579,19 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .side-body h4 { margin: 0 0 .5rem; font-size: .875rem; font-weight: 500; color: var(--muted); }
 .kv { display: grid; grid-template-columns: 1fr auto; gap: .375rem 1rem; font-variant-numeric: tabular-nums; }
 .kv span:nth-child(odd) { color: var(--muted); }
+/* 통계 탭: 사람마다 발언 분량 막대, 누가 누구에게 말했는지 */
+.stat-list { display: flex; flex-direction: column; gap: .75rem; }
+.stat-head { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+.stat-head b { color: var(--ct, var(--c)); font-weight: 600; }
+.stat-head span { color: var(--muted); font-size: .8125rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stat-bar { height: 6px; margin-top: .3125rem; background: var(--line); border-radius: 3px; overflow: hidden; }
+.stat-bar i { display: block; height: 100%; background: var(--c); border-radius: 3px; transition: width .6s var(--ease); }
+.stat-sub { margin-top: .25rem; color: var(--muted); font-size: .8125rem; }
+.stat-pairs { display: flex; flex-direction: column; gap: .625rem; }
+.stat-pair > div:first-child { display: flex; align-items: baseline; gap: .375rem; flex-wrap: wrap; }
+.stat-arrow { color: var(--dim); }
+.stat-n { margin-left: auto; color: var(--muted); font-size: .8125rem; font-variant-numeric: tabular-nums; }
+.stat-chips { display: flex; flex-wrap: wrap; gap: .375rem; }
 .meter { height: 6px; margin: .5rem 0 1rem; background: var(--line); border-radius: 3px; overflow: hidden; }
 .meter i { display: block; height: 100%; background: linear-gradient(90deg, var(--gold-lo), var(--gold-hi)); transition: width .6s var(--ease); }
 .src-list { display: flex; flex-direction: column; gap: .5rem; }
