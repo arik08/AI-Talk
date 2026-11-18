@@ -90,7 +90,11 @@ export function installTooltips(): void {
   });
   document.addEventListener('mousedown', hideTip, true);
   document.addEventListener('keydown', hideTip, true);
-  document.addEventListener('scroll', hideTip, true);
+  // 대상이 들어 있는 곳이 스크롤될 때만 숨긴다. 토론 중에는 대화창이 계속 흘러내리므로,
+  // 아무 스크롤에나 숨기면 옆의 인물 칸에서는 툴팁이 뜰 틈이 없다
+  document.addEventListener('scroll', (e) => {
+    if (tipTarget && e.target instanceof Node && e.target.contains(tipTarget)) hideTip();
+  }, true);
   window.addEventListener('blur', hideTip);
 }
 
