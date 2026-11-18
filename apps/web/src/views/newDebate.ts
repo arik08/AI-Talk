@@ -781,7 +781,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       field('웹 검색', seg([['auto', '자동'], ['off', '끔']], () => draft.search, (v) => { draft.search = v; }),
         '자동: 참가자가 필요하다고 판단할 때만 스스로 검색합니다. 검색한 만큼 요금이 따로 듭니다')),
     h('details', { class: 'adv' },
-      h('summary', null, icon(ChevronRight, 16), '고급 설정'),
+      h('summary', null, icon(ChevronRight, 16), '고급 설정',
+        h('span', { class: 'adv-hint' }, '모델과 추론 노력 · 끼어들기 · 발언 사이 뜸 · 검색 횟수 · 회의록 · 아바타 반응 · 숨은 속내')),
       h('div', { class: 'settings-grid' },
         field('모델', modelSel, '공통 설정입니다. 참가자, 진행자, 연출자가 모두 이 모델을 씁니다. 요금은 100만 토큰당 원화입니다'),
         field('추론 노력', effortSel),
@@ -804,7 +805,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   /* ---- 시작 ---- */
   const startNote = h('span', { class: 'muted' });
   const startBtn = h('button', { type: 'button', class: 'btn btn--primary btn--lg', onclick: () => start() }, icon(Play, 20), '토론 시작');
-  page.append(h('div', { class: 'start-bar' }, startNote, startBtn));
+  page.append(h('div', { class: 'start-bar' }, startNote, startBtn),
+    h('div', { class: 'credit' }, '제작 : 경영기획DX추진TF팀 오명철'));
 
   function paintStart(): void {
     persist();
