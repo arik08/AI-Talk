@@ -59,6 +59,24 @@ def test_debate_round_trip_and_minutes_update(tmp_path, monkeypatch):
     assert store.load_debate("d_one") is None
 
 
+def test_favorites_survive_edits_and_preset_refresh_and_go_with_the_persona(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    mine = store.save_persona({"name": "내가 만든 인물"})
+    assert not any(p["fav"] for p in store.list_personas())
+    assert store.set_favorite("preset_musk", True) and store.set_favorite(mine["id"], True)
+    assert not store.set_favorite("없는사람", True)
+    favs = lambda: {p["id"] for p in store.list_personas() if p["fav"]}
+    assert favs() == {"preset_musk", mine["id"]}
+    store.save_persona({**mine, "title": "고침", "fav": False})          # 고쳐 저장해도 즐겨찾기는 그대로
+    assert favs() == {"preset_musk", mine["id"]}
+    store.set_meta("presets", "1")                                        # 기본 인물 묶음이 새로 들어가도 남는다
+    monkeypatch.setattr(store, "_ready_for", None)
+    assert favs() == {"preset_musk", mine["id"]}
+    store.set_favorite("preset_musk", False)
+    store.delete_persona(mine["id"])                                      # 지운 인물은 즐겨찾기에서도 빠진다
+    assert favs() == set() and store.get_meta("favorites") == "[]"
+
+
 def test_presets_are_the_famous_people_set():
     import json
     people = json.loads((store.PRESETS / "personas.json").read_text(encoding="utf-8"))
@@ -66,14 +84,22 @@ def test_presets_are_the_famous_people_set():
     for name in ("일론 머스크", "스티브 잡스", "워런 버핏", "소크라테스", "니콜로 마키아벨리", "장 자크 루소", "박태준",
                  "박정희", "이순신", "세종대왕", "마하트마 간디", "샘 올트먼", "도널드 트럼프",
                  "프리드리히 니체", "이마누엘 칸트", "노자", "나폴레옹", "블라디미르 푸틴", "시진핑", "아이작 뉴턴", "정주영", "이건희", "데미스 하사비스", "다리오 아모데이",
-                 "제프 베이조스", "마크 저커버그", "젠슨 황"):
+                 "제프 베이조스", "마크 저커버그", "젠슨 황", "찰리 멍거", "조지 소로스", "레이 달리오", "캐시 우드", "마이클 버리",
+                 "애덤 스미스", "존 메이너드 케인스", "카를 마르크스", "전태일", "레이첼 카슨", "앨런 튜링", "마리 퀴리", "정약용",
+                 "프리드리히 하이에크", "알베르트 아인슈타인", "로버트 오펜하이머", "공자", "에이브러햄 링컨", "윈스턴 처칠",
+                 "파블로 피카소", "헨리 포드", "김정일",
+                 "이세돌", "백종원", "오은영", "강형욱", "빌 게이츠", "유발 하라리", "제프리 힌턴", "그레타 툰베리", "레이 커즈와일",
+                 "이승만", "전두환", "노태우", "김영삼", "김대중", "노무현", "이명박", "박근혜", "문재인"):
         assert name in names, name
-    assert len(names) == len(set(names)) == 27
+    assert len(names) == len(set(names)) == 67
     for p in people:
         assert p["id"].startswith("preset_") and p["title"] and p["personality"] and p["speech"] and len(p["claims"]) >= 2
         assert p["hidden"] == ""          # 실존 인물에게 숨은 속내를 지어 붙이지 않는다
-    assert sorted(p["avatar"]["variant"] for p in people) == list(range(27))   # 인물마다 자기 얼굴 아바타 하나
+    assert sorted(p["avatar"]["variant"] for p in people) == list(range(67))   # 인물마다 자기 얼굴 아바타 하나
     assert all(p["avatar"]["set"] == "figure" for p in people)
+    tags = {t for p in people for t in p["tags"]}   # 태그는 비슷한 것끼리 묶은 아홉 가지만 쓴다
+    assert tags == {"경영·산업", "투자·경제", "기술·AI", "과학·환경", "정치·외교", "철학·사상", "사회·문화", "역사 인물", "한국"}
+    assert all(1 <= len(p["tags"]) <= 4 for p in people)
 
 
 def test_old_preset_set_is_replaced_once_and_own_personas_are_kept(tmp_path, monkeypatch):
@@ -85,7 +111,7 @@ def test_old_preset_set_is_replaced_once_and_own_personas_are_kept(tmp_path, mon
     monkeypatch.setattr(store, "_ready_for", None)    # 서버를 다시 켠다
     names = [p["name"] for p in store.list_personas()]
     assert "강도현" not in names and "일론 머스크" in names and "내가 만든 인물" in names
-    assert len(names) == 28
+    assert len(names) == 68   # 기본 인물 67명 + 내가 만든 인물
     store.delete_persona("preset_musk")
     monkeypatch.setattr(store, "_ready_for", None)
     assert "일론 머스크" not in [p["name"] for p in store.list_personas()]   # 지운 기본 인물은 되살아나지 않는다

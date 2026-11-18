@@ -111,3 +111,28 @@ def test_mock_cast_uses_role_names_without_duplicates():
         schema=prompts.cast_schema(), model="mock-large", effort="low"))
     names = [p["name"] for p in data["personas"]]
     assert names[0] == "현장 엔지니어" and len(set(names)) == 8
+
+
+def test_warm_hints_exist_and_agree_does_not_ride_on_a_rebuttal():
+    assert prompts.edge_hint("agree", "agree", "default") == prompts.EDGE_HINT["agree"]
+    assert prompts.edge_hint("curious", "ask", "default") == prompts.EDGE_HINT["curious"]
+    assert prompts.edge_hint("agree", "rebut", "default") == ""
+    assert prompts.edge_hint("agree", "agree", "serious") == ""
+
+
+def test_speaker_is_told_not_to_write_planning_notes():
+    assert prompts.NO_NOTES in prompts.speaker_tail("가", "반박하세요.")
+    assert prompts.NO_NOTES in prompts.pgpt_directive("가", "반박하세요.")
+
+
+def test_library_personas_are_marked_as_characters_and_get_a_reminder():
+    """보관함에서 온 인물은 '캐릭터 인물'로 표시되고, 발언마다 그 사람다움을 드러내라는 한 줄이 붙는다."""
+    base = {"name": "이순신", "title": "조선 삼도수군통제사", "personality": "과묵하다"}
+    assert "캐릭터 인물" in prompts.persona_block({**base, "library": True})
+    assert "캐릭터 인물" not in prompts.persona_block(base)                     # 자동 생성한 인물에는 붙지 않는다
+    assert "이순신" in prompts.character_hint({**base, "library": True}, "default")
+    assert prompts.character_hint(base, "default") == ""
+    assert prompts.character_hint({**base, "library": True}, "serious") == ""   # 진지한 분위기에서는 논증이 앞선다
+    assert "캐릭터 인물" in prompts.RULES
+    assert "당신이 아는 것" in prompts.persona_block({**base, "library": True})   # 소개에 없는 지식도 쓰게 한다
+    assert "당신이 그 사람에 대해 이미 아는 것" in prompts.RULES

@@ -1,4 +1,4 @@
-import { createElement, Trash2, TriangleAlert, type IconNode } from 'lucide';
+import { createElement, Star, Trash2, TriangleAlert, type IconNode } from 'lucide';
 
 type Child = Node | string | number | null | undefined | false;
 
@@ -45,7 +45,15 @@ export function clear(el: Element): void {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
 
-/* ---------- 툴팁: 마우스를 1초 이상 올려 두었을 때만 뜬다 ---------- */
+/* ---------- 툴팁: 마우스를 0.5초 이상 올려 두었을 때만 뜬다 ---------- */
+const TIP_DELAY = 500;
+// 글 한 줄이 아니라 꾸민 카드를 띄우는 대상. 뜰 때마다 새로 그린다
+const richTips = new WeakMap<HTMLElement, () => Node>();
+/** 툴팁으로 카드를 띄운다. text는 같은 내용의 글(읽어 주는 도구와 대비용)이다. */
+export function richTip(el: HTMLElement, text: string, build: () => Node): void {
+  el.dataset.tip = text;
+  richTips.set(el, build);
+}
 let tipEl: HTMLElement | null = null;
 let tipTimer = 0;
 let tipTarget: HTMLElement | null = null;
@@ -63,7 +71,12 @@ function showTip(target: HTMLElement): void {
     tipEl = h('div', { class: 'tip', role: 'tooltip' });
     document.body.append(tipEl);
   }
-  tipEl.textContent = text;
+  const build = richTips.get(target);
+  const title = target.dataset.tipTitle;   // 제목이 있는 툴팁: 제목은 작은 금색 머리글로, 설명은 그 아래 본문으로
+  tipEl.className = build ? 'tip tip--card' : title ? 'tip tip--titled' : 'tip';
+  if (build) tipEl.replaceChildren(build());
+  else if (title) tipEl.replaceChildren(h('div', { class: 'tip-title' }, title), h('div', { class: 'tip-body' }, text));
+  else tipEl.replaceChildren(text);
   const rect = target.getBoundingClientRect();
   tipEl.classList.add('is-on');
   const box = tipEl.getBoundingClientRect();
@@ -71,6 +84,10 @@ function showTip(target: HTMLElement): void {
   left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8));
   let top = rect.top - box.height - 8;
   if (top < 8) top = rect.bottom + 8;
+  if (target.dataset.tipSide === 'left' && rect.left - box.width - 8 >= 8) {   // 긴 설명은 옆에 띄워 위아래 이웃을 가리지 않는다
+    left = rect.left - box.width - 8;
+    top = Math.max(8, Math.min(rect.top, window.innerHeight - box.height - 8));
+  }
   tipEl.style.left = `${left}px`;
   tipEl.style.top = `${top}px`;
 }
@@ -82,11 +99,15 @@ export function installTooltips(): void {
     hideTip();
     if (!target) return;
     tipTarget = target;
-    tipTimer = window.setTimeout(() => showTip(target), 1000);
+    tipTimer = window.setTimeout(() => showTip(target), TIP_DELAY);
   });
   document.addEventListener('mousedown', hideTip, true);
   document.addEventListener('keydown', hideTip, true);
-  document.addEventListener('scroll', hideTip, true);
+  // 대상이 들어 있는 곳이 스크롤될 때만 숨긴다. 토론 중에는 대화창이 계속 흘러내리므로,
+  // 아무 스크롤에나 숨기면 옆의 인물 칸에서는 툴팁이 뜰 틈이 없다
+  document.addEventListener('scroll', (e) => {
+    if (tipTarget && e.target instanceof Node && e.target.contains(tipTarget)) hideTip();
+  }, true);
   window.addEventListener('blur', hideTip);
 }
 
@@ -109,6 +130,36 @@ export function installFullscreen(): void {
       .catch(() => toast('전체화면으로 바꾸지 못했습니다. 다시 눌러 주세요.', 'error'))
       .finally(() => { busy = false; });
   }, true);
+}
+
+/* ---------- 즐겨찾기 별: 누르면 바로 바뀌고, 저장하지 못하면 되돌린다 ---------- */
+export function favButton(p: { fav?: boolean }, save: (on: boolean) => Promise<unknown>, opts: { size?: number; cls?: string; after?: () => void } = {}): HTMLButtonElement {
+  const btn = h('button', { class: `${opts.cls ?? 'btn btn--icon'} fav`, type: 'button' });
+  const paint = () => {
+    const label = p.fav ? '즐겨찾기 해제' : '즐겨찾기';
+    clear(btn);
+    btn.append(icon(Star, opts.size ?? 18));
+    btn.dataset.tip = label;
+    btn.setAttribute('aria-label', label);
+    btn.setAttribute('aria-pressed', String(!!p.fav));
+    btn.classList.toggle('is-on', !!p.fav);
+  };
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const on = !p.fav;
+    p.fav = on;
+    paint();
+    try {
+      await save(on);
+      opts.after?.();
+    } catch (err) {
+      p.fav = !on;
+      paint();
+      toast((err as Error).message, 'error');
+    }
+  });
+  paint();
+  return btn;
 }
 
 /* ---------- 삭제 버튼: 휴지통 → 경고 아이콘 → 한 번 더 눌러야 지운다 ---------- */

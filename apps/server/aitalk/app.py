@@ -149,6 +149,45 @@ async def persona_delete(persona_id: str) -> dict:
     return {"ok": True}
 
 
+class SuggestIn(BaseModel):
+    query: str
+    model: Optional[str] = None
+    effort: Optional[str] = None
+
+
+@app.post("/api/personas/suggest")
+async def persona_suggest(body: SuggestIn) -> dict:
+    """말로 적은 조건("원전에 찬성할 만한 과학자")에 맞는 보관함 인물을 AI가 추천한다. 잘 맞는 순서로 돌려준다."""
+    query = body.query.strip()[:500]
+    if not query:
+        raise HTTPException(400, "어떤 사람을 찾는지 적어 주세요.")
+    library = [p for p in store.list_personas() if p.get("id") and p.get("name")]
+    if not library:
+        return {"picks": [], "cost": 0}
+    provider = get_provider()
+    used = body.model or provider.default_model
+    try:
+        data, usage = await provider.generate_json(
+            system=prompts.SUGGEST_SYSTEM, prompt=prompts.suggest_prompt(query, library),
+            schema=prompts.suggest_schema(), model=used, effort=body.effort or provider.default_effort)
+    except ProviderError as exc:
+        raise _fail(exc) from exc
+    price = next((m.price for m in await provider.list_models() if m.id == used), None)
+    return {"picks": prompts.clean_suggestions(data.get("picks"), library), "cost": round(usage.cost(price), 5)}
+
+
+class FavoriteIn(BaseModel):
+    on: bool = True
+
+
+@app.post("/api/personas/{persona_id}/favorite")
+async def persona_favorite(persona_id: str, body: FavoriteIn) -> dict:
+    """즐겨 찾는 인물로 표시하거나 푼다. 목록에서 앞에 나오고, 보관함에서 구성할 때 먼저 고려된다."""
+    if not store.set_favorite(persona_id, body.on):
+        raise HTTPException(404, "보관함에 없는 인물입니다.")
+    return {"id": persona_id, "fav": body.on}
+
+
 @app.post("/api/personas/import")
 async def persona_import(items: list[dict]) -> dict:
     return {"added": store.import_personas(items)}
@@ -252,6 +291,45 @@ async def cast_from_library(body: CastLibraryIn) -> dict:
             "library": len(library), "asked": body.count}
 
 
+class CastRefreshIn(BaseModel):
+    topic: str
+    concept: str = ""
+    tone: str = "default"
+    policy: str = "auto"
+    participants: list[dict]
+    materials: str = ""
+    model: Optional[str] = None
+    effort: Optional[str] = None
+
+
+@app.post("/api/cast/refresh")
+async def cast_refresh(body: CastRefreshIn) -> dict:
+    """참가자는 그대로 두고, 바뀐 주제에 맞춰 각자의 관점·핵심 주장·양보 지점만 새로 받는다.
+
+    보관함의 인물이든 자동 생성한 인물이든 가리지 않는다. 받은 순서대로 돌려준다.
+    """
+    if not body.topic.strip():
+        raise HTTPException(400, "주제를 먼저 적어 주세요.")
+    people = [p for p in body.participants if isinstance(p, dict) and str(p.get("name", "")).strip()][:10]
+    if not people:
+        raise HTTPException(400, "입장을 맞출 참가자가 없습니다.")
+    numbered = [{**p, "id": f"c{i + 1}"} for i, p in enumerate(people)]   # 임시 번호로 묻고, 원래 id로 돌려준다
+    provider = get_provider()
+    used = body.model or provider.default_model
+    try:
+        data, usage = await provider.generate_json(
+            system=prompts.REFRESH_SYSTEM,
+            prompt=prompts.refresh_prompt(body.topic, numbered, body.policy, body.materials, body.concept, body.tone),
+            schema=prompts.pick_schema(), model=used, effort=body.effort or provider.default_effort)
+    except ProviderError as exc:
+        raise _fail(exc) from exc
+    ids = [p["id"] for p in numbered]
+    merged = prompts.merge_picks(data.get("personas") or [], numbered, len(numbered), ids)
+    out = [{**m, "id": people[i].get("id")} for i, m in enumerate(merged)]
+    price = next((m.price for m in await provider.list_models() if m.id == used), None)
+    return {"personas": out, "usage": usage.to_dict(), "cost": round(usage.cost(price), 5)}
+
+
 # ---------------------------------------------------------------- 자료
 @app.post("/api/materials")
 async def material_upload(file: UploadFile = File(...)) -> dict:
@@ -303,7 +381,7 @@ class DebateIn(BaseModel):
     language: str = "ko"
     summary: bool = True
     prep_cost: float = 0       # 토론을 시작하기 전에 든 비용(참가자 생성). 총 비용에 더한다
-    reactions: str = "smart"
+    reactions: str = "all"
     hidden_agenda: Optional[bool] = None
     compact_threshold: Optional[int] = None
 

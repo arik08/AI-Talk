@@ -75,7 +75,7 @@ def _connect() -> sqlite3.Connection:
     return con
 
 
-PRESET_SET = "8"   # 기본 인물 묶음의 판. 묶음을 바꿀 때 올린다 (2: 유명인 13명, 3: 22명, 4: 인물 아바타, 5: 24명, 6: 27명, 7: 28명, 8: 27명)
+PRESET_SET = "13"   # 기본 인물 묶음의 판. 묶음을 바꿀 때 올린다 (2: 유명인 13명, 3: 22명, 4: 인물 아바타, 5: 24명, 6: 27명, 7: 28명, 8: 27명, 9: 투자 구루를 더해 32명, 10: 경제학자·과학자·노동·환경·예술 쪽을 더해 49명, 11: 살아 있는 국내외 유명인 9명을 더해 58명, 12: 역대 대통령 9명을 더해 67명, 13: 태그를 아홉 묶음으로 정리)
 
 
 def _insert_presets(con: sqlite3.Connection, people: list) -> None:
@@ -132,14 +132,44 @@ def set_meta(key: str, value: str) -> None:
 
 
 # ---------------------------------------------------------------- 페르소나
+def _favorites(con: sqlite3.Connection) -> list[str]:
+    row = con.execute("SELECT value FROM meta WHERE key = 'favorites'").fetchone()
+    try:
+        ids = json.loads(row["value"]) if row else []
+    except ValueError:
+        ids = []
+    return [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else []
+
+
 def list_personas() -> list[dict]:
+    """보관함의 인물. 즐겨 찾는 인물에는 fav=True가 붙는다.
+
+    즐겨찾기는 인물 정보와 따로 둔다(meta의 favorites). 인물을 고쳐 저장하거나 기본 인물 묶음을 새로 넣어도 남는다.
+    """
     with closing(_connect()) as con:
         rows = con.execute("SELECT data FROM personas ORDER BY sort DESC").fetchall()
-    return [json.loads(r["data"]) for r in rows]
+        favs = set(_favorites(con))
+    people = [json.loads(r["data"]) for r in rows]
+    for p in people:
+        p["fav"] = p.get("id") in favs
+    return people
+
+
+def set_favorite(persona_id: str, on: bool) -> bool:
+    """인물을 즐겨찾기에 넣거나 뺀다. 보관함에 없는 인물이면 False."""
+    with closing(_connect()) as con, con:
+        if not con.execute("SELECT 1 FROM personas WHERE id = ?", (persona_id,)).fetchone():
+            return False
+        ids = [i for i in _favorites(con) if i != persona_id]
+        if on:
+            ids.append(persona_id)
+        con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('favorites', ?)", (json.dumps(ids),))
+    return True
 
 
 def save_persona(persona: dict) -> dict:
     persona = {**persona, "id": persona.get("id") or new_id("p")}
+    persona.pop("fav", None)   # 즐겨찾기는 따로 둔다
     blob = json.dumps(persona, ensure_ascii=False)
     with closing(_connect()) as con, con:
         if con.execute("SELECT 1 FROM personas WHERE id = ?", (persona["id"],)).fetchone():
@@ -155,6 +185,8 @@ def save_persona(persona: dict) -> dict:
 def delete_persona(persona_id: str) -> None:
     with closing(_connect()) as con, con:
         con.execute("DELETE FROM personas WHERE id = ?", (persona_id,))
+        ids = [i for i in _favorites(con) if i != persona_id]
+        con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('favorites', ?)", (json.dumps(ids),))
 
 
 def import_personas(items: list[dict]) -> int:

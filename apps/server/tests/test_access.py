@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from aitalk import app as app_module  # noqa: E402
-from aitalk import store  # noqa: E402
+from aitalk import prompts, store  # noqa: E402
 from aitalk.config import settings  # noqa: E402
 from aitalk.providers.mock import MockProvider  # noqa: E402
 
@@ -115,6 +115,42 @@ def test_cast_from_library_picks_existing_personas_and_adapts_their_stance(monke
     assert client.post("/api/cast/library", json={"topic": "주제", "count": 3}).status_code == 400   # 고를 사람이 모자라다
 
 
+def test_persona_suggest_returns_only_library_people_in_order(monkeypatch, tmp_path):
+    """인물 추천: 보관함에 있는 사람만, 겹치지 않게, 추천한 순서대로 까닭과 함께 돌려준다."""
+    client = _client(monkeypatch, tmp_path)
+    res = client.post("/api/personas/suggest", json={"query": "투자자"})
+    assert res.status_code == 200, res.text
+    picks = res.json()["picks"]
+    library = {p["id"]: p for p in store.list_personas()}
+    assert picks and all(p["id"] in library and p["why"] for p in picks)        # 목록에 없는 id는 버린다
+    assert len({p["id"] for p in picks}) == len(picks) <= prompts.SUGGEST_MAX
+    assert all("투자자" in json.dumps(library[p["id"]], ensure_ascii=False) for p in picks)
+    assert res.json()["cost"] >= 0
+    assert client.post("/api/personas/suggest", json={"query": "  "}).status_code == 400
+    lib = [{"id": "a", "name": "가"}, {"id": "b", "name": "나"}]
+    assert prompts.clean_suggestions([{"id": "[b]", "why": "까닭"}, {"id": "b", "why": "또"}, {"id": "x", "why": ""}, "글"], lib) == [{"id": "b", "why": "까닭"}]
+    assert "★ [a]" in prompts.suggest_prompt("찾는 말", [{**lib[0], "fav": True}, lib[1]])
+
+
+def test_cast_refresh_keeps_the_people_and_only_rewrites_their_stance(monkeypatch, tmp_path):
+    """입장 새로 맞추기: 사람과 순서는 그대로, 관점·핵심 주장·양보 지점만 바뀐다. 보관함에 없는 인물도 된다."""
+    client = _client(monkeypatch, tmp_path)
+    people = [{"id": "preset_musk", "name": "일론 머스크", "title": "CEO", "personality": "대담", "speech": "짧게",
+               "viewpoint": "옛 관점", "claims": ["옛 주장"], "concede": "옛 양보", "color": "#fff"},
+              {"name": "웹툰 작가", "title": "자동 생성한 인물", "viewpoint": "옛 관점", "claims": ["옛 주장"], "concede": ""},
+              {"name": " "}]
+    res = client.post("/api/cast/refresh", json={"topic": "새 주제", "participants": people})
+    assert res.status_code == 200, res.text
+    out = res.json()["personas"]
+    assert [p["name"] for p in out] == ["일론 머스크", "웹툰 작가"]          # 이름 없는 칸은 빼고, 순서는 그대로
+    assert out[0]["id"] == "preset_musk" and out[1]["id"] is None             # 원래 id로 돌려준다
+    assert all(p["viewpoint"] != "옛 관점" and p["claims"] != ["옛 주장"] for p in out)
+    assert out[0]["personality"] == "대담" and out[0]["color"] == "#fff"      # 인물 정보는 그대로
+    assert res.json()["cost"] >= 0
+    assert client.post("/api/cast/refresh", json={"topic": " ", "participants": people}).status_code == 400
+    assert client.post("/api/cast/refresh", json={"topic": "주제", "participants": [{"name": ""}]}).status_code == 400
+
+
 def test_library_picks_ignore_unknown_and_duplicate_ids_and_fill_up():
     from aitalk import prompts
     library = [{"id": f"p{i}", "name": f"인물{i}", "viewpoint": "원래 관점", "claims": ["원래 주장"], "concede": "원래"} for i in range(4)]
@@ -132,6 +168,11 @@ def test_library_picks_ignore_unknown_and_duplicate_ids_and_fill_up():
     assert "[p3] 인물3" in text and "남은 2자리" in text
     text = prompts.pick_prompt("주제", 2, "auto", library)
     assert "- [p0] 인물0" in text and "참가자 2명" in text
+    # 즐겨 찾는 인물은 후보 목록에 ★로 표시되고, 모자란 자리를 채울 때도 먼저 들어간다
+    library[3]["fav"] = True
+    text = prompts.pick_prompt("주제", 2, "auto", library)
+    assert "- ★ [p3] 인물3" in text and "- [p0] 인물0" in text
+    assert [p["id"] for p in prompts.merge_picks([], library, 2)] == ["p3", "p0"]
 
 
 def test_verdict_ranks_every_participant_and_is_saved(monkeypatch, tmp_path):

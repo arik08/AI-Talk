@@ -1,5 +1,5 @@
 import {
-  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, ListOrdered, LoaderCircle, Megaphone, MessagesSquare, Pause,
+  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, Info, ListOrdered, LoaderCircle, Megaphone, MessagesSquare, Pause,
   PenLine, Play, Rewind, Scale, Search, Send, SkipForward, StepForward, TriangleAlert, Trophy, Zap, type IconNode,
 } from 'lucide';
 import { api } from '../api';
@@ -8,17 +8,78 @@ import { createAvatar, setAvatar } from '../avatar/avatar';
 import { copyText, recordToMarkdown } from '../export';
 import type { AppContext } from '../main';
 import { INTENT_LABEL, MOOD_LABEL, TONE_LABEL, type DebateEvent, type DebateRecord, type Mood, type Persona } from '../types';
-import { clear, fmtCost, fmtTime, h, icon, put, safeColor, toast, USD_KRW } from '../ui/dom';
+import { richTip, clear, fmtCost, fmtTime, h, icon, put, safeColor, toast, USD_KRW } from '../ui/dom';
 import { renderCited, sourceList, sourceToggle } from '../ui/sources';
 import { drawSpeech, renderSpeech, speechBlocks, speechLength } from '../ui/speech';
 
 interface Seat { persona: Persona; tile: HTMLElement; av: HTMLElement; urge: HTMLElement; status: HTMLElement; badge: HTMLElement }
 interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; av: HTMLElement; speaker: string; cut: boolean; started: boolean; raw: string; times: number[] }
+const REVEAL_CPS = 90;   // 쓰이는 중인 회의록·판정의 글자가 나타나는 빠르기 (초당 글자 수)
+const REVEAL_LAG_MS = 1200;   // 받은 글이 이보다 오래 밀리지 않게, 밀리면 더 빨리 내보낸다
+
+/**
+ * 쓰이는 중인 카드(회의록, 판정)의 새 글자를 발언처럼 왼쪽부터 차례로 나타나게 한다.
+ * 이 카드들은 조각이 올 때마다 통째로 다시 그려서, 그대로 두면 글이 덩어리째 턱턱 붙는다.
+ * 글자마다 나타날 시각을 times에 적어 두고, 다시 그려도 나타나던 글자는 하던 움직임을 이어 간다.
+ * 조각이 몰려 와도 앞 글자 뒤에 줄을 세워 한결같은 빠르기로 흘러나온다.
+ */
+export function reveal(root: HTMLElement, times: number[]): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let total = 0;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    nodes.push(n as Text);
+    total += Array.from((n as Text).data).length;
+  }
+  const now = performance.now();
+  if (total < times.length) times.length = total;
+  const fresh = total - times.length;
+  if (fresh > 0) {
+    // 글은 한 곳에서만 나온다. 아직 나타나기 전인 글자와 새 글자를 한 줄로 다시 세우고,
+    // 밀려 있으면 뒤쪽을 따로 먼저 내보내지 않고 줄 전체의 빠르기를 올려 따라잡는다
+    let from = times.length;
+    while (from > 0 && times[from - 1] > now) from -= 1;
+    const waiting = total - from;
+    const step = Math.min(1000 / REVEAL_CPS, REVEAL_LAG_MS / waiting);
+    times.length = from;
+    for (let k = 0; k < waiting; k += 1) times.push(now + k * step);
+  }
+  let index = 0;
+  for (const node of nodes) {
+    const chars = Array.from(node.data);
+    const base = index;
+    index += chars.length;
+    const first = chars.findIndex((_, k) => times[base + k] - now > -CH_IN_MS);
+    if (first < 0) continue;   // 이미 다 나타난 글
+    const frag = document.createDocumentFragment();
+    if (first) frag.append(chars.slice(0, first).join(''));
+    for (let k = first; k < chars.length; k += 1) {
+      frag.append(h('span', { class: 'ch', style: `animation-delay:${Math.round(times[base + k] - now)}ms` }, chars[k]));
+    }
+    node.replaceWith(frag);
+  }
+}
+
 const CH_IN_MS = 550;   // 글자 하나가 나타나는 움직임의 길이 (app.css의 ch-in과 같다)
+
+/** 덧붙이는 설명은 늘 보이게 두지 않고, 정보 아이콘에 마우스를 올렸을 때 보여 준다. */
+function infoTip(text: string): HTMLElement {
+  return h('span', { class: 'info-tip', role: 'img', 'aria-label': text, tip: text }, icon(Info, 15));
+}
 
 const SPEEDS: [string, string][] = [['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']];
 const CPS: Record<string, number> = { slow: 8, normal: 14, fast: 26 };   // 서버가 글자를 내보내는 속도와 같다
-const SPEECH_CPS = 5.5;   // 토론 시계: 사람이 말하는 속도(초당 글자). 서버의 값과 같다
+
+/** 토론 시계의 단위: 글이 보통 속도로 화면에 다 나오는 데 걸리는 시간. 서버의 screen_seconds와 같은 계산이다. */
+function screenSeconds(text: string): number {
+  let total = 0;
+  for (const word of text.split(/\s+/)) {
+    if (!word) continue;
+    const tail = word[word.length - 1];
+    total += Array.from(word).length / CPS.normal + (',，、'.includes(tail) ? 0.16 : '.?!…。'.includes(tail) ? 0.36 : 0);
+  }
+  return total;
+}
 const QUESTIONS = ['누가 가장 설득력 있었나요?', '가장 크게 갈린 쟁점은 무엇이었나요?', '빠진 관점이 있다면 무엇인가요?'];
 
 /** 타임라인의 한 칸: 발언 하나가 차지하는 구간(진행률 %)과, 그 발언이 시작되는 이벤트의 자리. */
@@ -34,6 +95,10 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   let speaking: string | null = null;
   let spotHot = false;
   let lastSpeech: { speaker: string; cut: boolean } | null = null;
+  // 통계: 발언마다 누가, 누구에게, 어떤 뜻과 감정으로, 얼마나 말했는지 적어 둔다. 다시 보기에서도 같은 길로 쌓인다
+  interface Said { speaker: string; kind: string; intent: string; target: string; mood: string; interject: boolean; cut: boolean; chars: number; done: boolean }
+  const said = new Map<number, Said>();
+  const searched = new Map<string, number>();
   let state = 'running';
   let badgeMode = 'on';
   let speed = 'normal';
@@ -47,9 +112,12 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   let qaEl: HTMLElement | null = null;
   let liveCard: Card | null = null;   // 지금 글자가 나오고 있는 발언
   let marks: Mark[] = [];
-  // 토론 시계: 서버는 발언이 끝날 때만 알려 준다. 그 사이에는 화면에 나온 글자 수로 어림해 1초씩 올린다
+  // 토론 시계: 서버는 발언이 끝날 때만 알려 준다. 그 사이에는 화면에 나온 글로 어림해 1초씩 올린다.
+  // 보통 속도로 화면에 나오는 시간을 재므로, 보통 속도에서는 실제 시간과 같이 간다
   const clock = { base: 0, shown: 0, max: null as number | null };
   let minutesEl: HTMLElement | null = null;
+  let minutesTimes: number[] = [];   // 쓰이는 중인 회의록·판정의 글자가 나타날 시각 (reveal)
+  let verdictTimes: number[] = [];
   let waitEl: HTMLElement | null = null;   // 회의록을 쓰는 동안 그 자리에 놓는 카드
   let waitTimer = 0;
   let costEl: HTMLElement | null = null;
@@ -68,7 +136,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
   const clockTurn = h('b', null, '0');
   const clockTime = h('b', null, '00:00');
   const clockCost = h('b', null, '0원');
-  const sideBtn = h('button', { type: 'button', class: 'btn btn--icon', tip: '자료·출처·사용량 패널', 'aria-label': '옆 패널 열고 닫기' }, icon(BookOpen, 18));
+  const sideBtn = h('button', { type: 'button', class: 'btn btn--icon', tip: '통계·사용량·출처·자료 패널', 'aria-label': '옆 패널 열고 닫기' }, icon(BookOpen, 18));
   const cast = h('aside', { class: 'cast', 'aria-label': '참가자' });
   const spotlight = h('div', { class: 'spotlight' });
   const inner = h('div', { class: 'transcript-inner' });
@@ -88,16 +156,61 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     h('header', { class: 'stage-head' }, phaseChip, topic,
       h('div', { class: 'clock' },
         h('span', { tip: '진행한 턴' }, icon(ListOrdered, 16), clockTurn),
-        h('span', { tip: '토론 시계: 실제로 말했다면 걸렸을 시간' }, icon(Hourglass, 16), clockTime),
+        h('span', { tip: '토론 시계: 보통 속도로 볼 때 걸리는 시간' }, icon(Hourglass, 16), clockTime),
         h('span', { tip: '지금까지 든 예상 비용: 토큰 요금 + 웹 검색 요금' }, icon(Coins, 16), clockCost), sideBtn)),
     h('div', { class: 'stage-body' }, transcript, side, cast),
     h('footer', { class: 'dock' }, timeline, controls));
   root.append(stage);
 
+  // 맨 아래를 따라갈 때는 한 번에 뛰지 않고, 용수철에 끌려가듯 속도를 서서히 올리고 서서히 줄인다 (2차 저역 통과 필터).
+  // 남은 거리의 일정 비율씩 다가가는 방식(1차)은 줄이 하나 늘 때마다 최고 속도로 출발해 턱턱 끊겨 보였다.
+  // 속도가 이어지므로 줄이 잇달아 늘면 움직임이 서로 겹쳐 한결같은 속도로 흘러내린다
+  const GLIDE_MS = 320;        // 따라붙는 빠르기. 크면 느긋하고 부드럽고, 작으면 바짝 따라붙는다
+  let glide = 0;               // 돌고 있는 requestAnimationFrame
+  let glideSpeed = 0;          // 지금 내려가는 속도 (px/ms)
+  let glidePos = 0;            // 소수점까지 들고 있는 위치 (scrollTop은 정수로 깎일 수 있다)
+  let glideSet = -1;           // 우리가 마지막으로 넣은 scrollTop. 이것과 다르면 사용자가 움직인 것이다
+  let glideAt = 0;
+  const calm = window.matchMedia('(prefers-reduced-motion: reduce)');
   transcript.addEventListener('scroll', () => {
+    if (glide && Math.abs(transcript.scrollTop - glideSet) < 2) return;   // 우리가 움직인 것
     stick = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 120;
+    glidePos = transcript.scrollTop;
+    glideSpeed = 0;
   });
-  const follow = () => { if (stick) transcript.scrollTop = transcript.scrollHeight; };
+  const glideStep = (now: number) => {
+    const goal = transcript.scrollHeight - transcript.clientHeight;
+    const gap = goal - glidePos;
+    if (!stick || (gap < 0.5 && glideSpeed < 0.01)) {
+      if (stick) transcript.scrollTop = goal;
+      glide = 0;
+      glideSpeed = 0;
+      return;
+    }
+    let left = Math.min(now - glideAt, 100);
+    glideAt = now;
+    const w = 1 / GLIDE_MS;
+    while (left > 0) {   // 임계 감쇠 용수철. 프레임이 길어도 흔들리지 않게 잘게 나눠 계산한다
+      const dt = Math.min(left, 8);
+      left -= dt;
+      glideSpeed += (w * w * (goal - glidePos) - 2 * w * glideSpeed) * dt;
+      glidePos += glideSpeed * dt;
+    }
+    if (glidePos >= goal) { glidePos = goal; glideSpeed = 0; }   // 목표를 지나치지 않는다
+    transcript.scrollTop = glidePos;
+    glideSet = transcript.scrollTop;
+    glide = requestAnimationFrame(glideStep);
+  };
+  const follow = () => {
+    if (!stick) return;
+    if (calm.matches || document.hidden) { transcript.scrollTop = transcript.scrollHeight; return; }   // 안 보이는 탭은 프레임이 돌지 않는다
+    if (glide) return;
+    glidePos = transcript.scrollTop;
+    glideSet = glidePos;
+    glideSpeed = 0;
+    glideAt = performance.now();
+    glide = requestAnimationFrame(glideStep);
+  };
   sideBtn.addEventListener('click', () => { side.classList.toggle('is-closed'); if (!side.classList.contains('is-closed')) paintSide(); });
 
   /* ---------- 토론 시계 ---------- */
@@ -111,21 +224,22 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     paintClock();
   }
   const clockTimer = window.setInterval(() => {
-    const said = liveCard ? Array.from(liveCard.raw).length / SPEECH_CPS : 0;   // 지금 발언에서 이미 말한 만큼
+    const said = liveCard ? screenSeconds(liveCard.raw) : 0;   // 지금 발언에서 이미 말한 만큼
     if (clock.shown + 1 > clock.base + said) return;
     clock.shown = Math.floor(clock.shown) + 1;
     paintClock();
   }, 200);
 
   /* ---------- 옆 패널 ---------- */
-  let tab: 'usage' | 'sources' | 'materials' = 'usage';
+  let tab: 'stats' | 'usage' | 'sources' | 'materials' = 'stats';
   let usage: any = null;
   let briefing = '';
   function paintSide(): void {
     clear(tabs);
-    ([['usage', '사용량'], ['sources', '출처'], ['materials', '자료']] as const).forEach(([key, label]) =>
+    ([['stats', '통계'], ['usage', '사용량'], ['sources', '출처'], ['materials', '자료']] as const).forEach(([key, label]) =>
       tabs.append(h('button', { type: 'button', class: tab === key ? 'is-on' : '', onclick: () => { tab = key; paintSide(); } }, label)));
     clear(sideBody);
+    if (tab === 'stats') { paintStats(); return; }
     if (tab === 'usage') {
       if (!usage) { sideBody.append(h('p', { class: 'muted' }, '아직 사용량이 없습니다.')); return; }
       const t = usage.total;
@@ -138,7 +252,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
           h('span', null, '캐시에 쓴 입력'), h('span', null, `${t.cache_write.toLocaleString()} 토큰`),
           h('span', null, '출력'), h('span', null, `${t.output.toLocaleString()} 토큰`),
           h('span', null, '웹 검색'), h('span', null, `${Number(t.searches ?? 0).toLocaleString()}건`),
-          h('span', null, '예상 비용'), h('span', null, fmtCost(Number(usage.cost ?? 0), money.rate)),
+          h('span', null, '예상 비용', infoTip(`측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 웹 검색은 건당 ${fmtCost(money.searchUsd, money.rate)}, 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`)),
+          h('span', null, fmtCost(Number(usage.cost ?? 0), money.rate)),
           h('span', null, 'AI 호출'), h('span', null, (() => {
             const calls = usage.calls ?? {};
             const director = calls.director ?? 0;
@@ -148,8 +263,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         h('h4', { style: 'margin-top:1.25rem' }, '화자별 출력'),
         h('div', { class: 'kv' }, Object.entries(usage.by ?? {}).flatMap(([who, u]: [string, any]) => [
           h('span', null, who === 'director' ? '연출자(안 보임)' : seats.get(who)?.persona.name ?? who),
-          h('span', null, `${u.output.toLocaleString()} 토큰`)])),
-        h('p', { class: 'muted small', style: 'margin-top:1rem' }, `측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 웹 검색은 건당 ${fmtCost(money.searchUsd, money.rate)}, 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`));
+          h('span', null, `${u.output.toLocaleString()} 토큰`)])));
     } else if (tab === 'sources') {
       if (!registry.size) { sideBody.append(h('p', { class: 'muted' }, '웹에서 찾은 출처가 없습니다.')); return; }
       const list = sourceList(registry.list(), registry);
@@ -172,6 +286,77 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     }
   }
 
+  /** 통계 탭: 누가 얼마나 말했는지, 누가 누구에게 말했는지, 어떤 발언이 많았는지. 끝난 발언만 센다. */
+  function paintStats(): void {
+    const rows = [...said.values()].filter((s) => s.done);
+    const talk = rows.filter((s) => s.speaker !== 'moderator');
+    if (!talk.length) { sideBody.append(h('p', { class: 'muted' }, '아직 끝난 발언이 없습니다.')); return; }
+    const nameOf = (id: string) => seats.get(id)?.persona.name ?? id;
+    const colorOf = (id: string) => safeColor(seats.get(id)?.persona.color);
+    const top = (counts: Map<string, number>) => [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const count = <K,>(items: K[]) => items.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map<K, number>());
+    const kindOf = (s: Said) => (s.kind === 'free' ? s.intent : s.kind);
+
+    // 1. 발언 횟수와 분량
+    const people = [...seats.keys()].filter((id) => id !== 'moderator').map((id) => {
+      const mine = talk.filter((s) => s.speaker === id);
+      const free = mine.filter((s) => s.kind === 'free');
+      return { id, turns: mine.length, chars: mine.reduce((a, s) => a + s.chars, 0),
+        intent: top(count(free.map((s) => s.intent))), mood: top(count(mine.map((s) => s.mood).filter((m) => m && m !== 'calm'))) };
+    });
+    const maxChars = Math.max(1, ...people.map((p) => p.chars));
+    const totalChars = Math.max(1, people.reduce((a, p) => a + p.chars, 0));
+    sideBody.append(h('h4', null, '발언 횟수와 분량'), h('div', { class: 'stat-list' }, people.map((p) =>
+      h('div', { class: 'stat-row', style: `--c:${colorOf(p.id)}` },
+        h('div', { class: 'stat-head' }, h('b', null, nameOf(p.id)),
+          h('span', null, `${p.turns}회 · ${p.chars.toLocaleString()}자 · ${Math.round((p.chars / totalChars) * 100)}%`)),
+        h('div', { class: 'stat-bar' }, h('i', { style: `width:${(p.chars / maxChars) * 100}%` })),
+        p.intent || p.mood ? h('div', { class: 'stat-sub' },
+          [p.intent ? `주로 ${INTENT_LABEL[p.intent[0]] ?? p.intent[0]}` : '', p.mood ? `자주 ${MOOD_LABEL[p.mood[0] as Mood] ?? p.mood[0]}` : ''].filter(Boolean).join(' · ')) : null))));
+
+    // 2. 눈에 띄는 기록
+    const longest = [...said.entries()].filter(([, s]) => s.done && s.speaker !== 'moderator').sort((a, b) => b[1].chars - a[1].chars)[0];
+    const most = (pick: (s: Said) => boolean) => top(count(talk.filter(pick).map((s) => s.speaker)));
+    const marks: [string, string][] = [];
+    const add = (label: string, hit: [string, number] | undefined, unit = '번') => { if (hit) marks.push([label, `${nameOf(hit[0])} · ${hit[1]}${unit}`]); };
+    add('가장 많이 말한 사람', [...people].sort((a, b) => b.turns - a.turns || b.chars - a.chars).map((p) => [p.id, p.turns] as [string, number])[0], '회');
+    add('가장 많이 반박한 사람', most((s) => s.kind === 'free' && s.intent === 'rebut'));
+    add('가장 많이 물은 사람', most((s) => s.kind === 'free' && s.intent === 'ask'));
+    add('가장 많이 수긍한 사람', most((s) => s.kind === 'free' && s.intent === 'agree'));
+    add('가장 많이 지목된 사람', top(count(talk.map((s) => s.target).filter((t) => t && seats.has(t)))));
+    add('가장 자주 격앙된 사람', most((s) => s.mood === 'heated'));
+    add('끼어든 사람', most((s) => s.interject));
+    add('말이 끊긴 사람', most((s) => s.cut));
+    add('가장 많이 검색한 사람', top(searched), '건');
+    if (longest) marks.push(['가장 긴 발언', `#${longest[0]} ${nameOf(longest[1].speaker)} · ${longest[1].chars.toLocaleString()}자`]);
+    sideBody.append(h('h4', { style: 'margin-top:1.25rem' }, '눈에 띄는 기록'),
+      h('div', { class: 'kv' }, marks.flatMap(([k, v]) => [h('span', null, k), h('span', null, v)])));
+
+    // 3. 누가 누구에게
+    const pairs = [...count(talk.filter((s) => s.target && seats.has(s.target) && s.target !== s.speaker).map((s) => `${s.speaker}|${s.target}`)).entries()]
+      .sort((a, b) => b[1] - a[1]).slice(0, 6);
+    if (pairs.length) {
+      sideBody.append(h('h4', { style: 'margin-top:1.25rem' }, '누가 누구에게'), h('div', { class: 'stat-pairs' }, pairs.map(([key, n]) => {
+        const [from, to] = key.split('|');
+        const kinds = [...count(talk.filter((s) => s.speaker === from && s.target === to).map(kindOf)).entries()].sort((a, b) => b[1] - a[1])
+          .map(([k, c]) => `${INTENT_LABEL[k] ?? k} ${c}`).join(' · ');
+        return h('div', { class: 'stat-pair' },
+          h('div', null, h('b', { style: `color:${colorOf(from)}` }, nameOf(from)), h('span', { class: 'stat-arrow', 'aria-label': '에게' }, '→'),
+            h('b', { style: `color:${colorOf(to)}` }, nameOf(to)), h('span', { class: 'stat-n' }, `${n}번`)),
+          h('div', { class: 'stat-sub' }, kinds));
+      })));
+    }
+
+    // 4. 발언의 성격
+    const kinds = [...count(talk.filter((s) => s.kind === 'free').map((s) => s.intent)).entries()].sort((a, b) => b[1] - a[1]);
+    const moods = [...count(talk.map((s) => s.mood).filter(Boolean)).entries()].sort((a, b) => b[1] - a[1]);
+    if (kinds.length) sideBody.append(h('h4', { style: 'margin-top:1.25rem' }, '자유토론 발언의 성격'),
+      h('div', { class: 'stat-chips' }, kinds.map(([k, n]) => h('span', { class: 'chip' }, `${INTENT_LABEL[k] ?? k} ${n}`))));
+    if (moods.length) sideBody.append(h('h4', { style: 'margin-top:1.25rem' }, '발언할 때의 감정'),
+      h('div', { class: 'stat-chips' }, moods.map(([m, n]) => h('span', { class: 'chip' }, `${MOOD_LABEL[m as Mood] ?? m} ${n}`))));
+  }
+  const refreshStats = () => { if (tab === 'stats' && !side.classList.contains('is-closed')) paintSide(); };
+
   /* ---------- 참가자 자리 ---------- */
   function modelLabel(modelId: string, effort: string): string {
     const label = ctx.status?.models.find((m) => m.id === modelId)?.label ?? modelId;
@@ -188,11 +373,25 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       const urge = h('i');
       const status = h('div', { class: 'tile-status' });
       const badge = h('div', { class: 'tile-badge' }, p.id === 'moderator' ? '' : modelLabel(p.model || config.model, p.effort || config.effort));
-      const tile = h('div', { class: 'tile', style: `--c:${color}` }, av,
+      // 인물 위에 마우스를 올리면 그 사람이 누구인지 보여 준다. 숨은 의도(hidden)는 넣지 않는다
+      const about = [[p.name, p.title].filter(Boolean).join(' · '),
+        ...([['분야', p.expertise], ['입장', p.viewpoint], ['성격', p.personality], ['말투', p.speech]] as const)
+          .filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`)].join('\n');
+      const tile = h('div', { class: 'tile', style: `--c:${color}`, 'data-tip-side': 'left' }, av,
         h('div', { class: 'tile-info' },
-          h('div', { class: 'tile-name' }, p.name), h('div', { class: 'tile-sub', tip: p.title }, p.title),
+          h('div', { class: 'tile-name' }, p.name), h('div', { class: 'tile-sub' }, p.title),
           p.id === 'moderator' ? null : h('div', { class: 'urge', tip: '지금 말하고 싶은 정도' }, urge),
           h('div', { class: 'tile-foot' }, status, badge)));
+      richTip(tile, about, () => {
+        const face = createAvatar(p.avatar, color, 48);
+        face.classList.add('is-still');
+        const rows = ([['분야', p.expertise], ['성격', p.personality], ['말투', p.speech]] as const).filter(([, v]) => v);
+        return h('div', { class: 'who', style: `--c:${color}` },
+          h('div', { class: 'who-head' }, face,
+            h('div', null, h('div', { class: 'who-name' }, p.name), p.title ? h('div', { class: 'who-title' }, p.title) : null)),
+          p.viewpoint ? h('p', { class: 'who-view' }, p.viewpoint) : null,
+          rows.length ? h('dl', { class: 'who-rows' }, rows.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)])) : null);
+      });
       cast.append(tile);
       seats.set(p.id!, { persona: p, tile, av, urge, status, badge });
     };
@@ -255,6 +454,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const prev = speaking;
     if (prev && prev !== ev.speaker) setAvatar(seats.get(prev)!.av, { state: lastSpeech?.cut ? 'cut' : 'listening' });
     speaking = ev.speaker;
+    said.set(ev.id, { speaker: ev.speaker, kind: String(ev.kind ?? ''), intent: String(ev.intent ?? ''), target: String(ev.target ?? ''),
+      mood: String(ev.mood ?? ''), interject: !!ev.interject, cut: false, chars: 0, done: false });
     setAvatar(seat.av, { state: 'speaking', mood: (ev.mood as Mood) || 'calm', wants: false });
     seat.tile.classList.remove('is-hot');
     setStatus(ev.speaker, null);
@@ -310,34 +511,43 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const card = cards.get(ev.id);
     if (!card) return;
     if (liveCard === card) liveCard = null;
-    if (ev.failed) { card.root.remove(); cards.delete(ev.id); return; }
+    if (ev.failed) { card.root.remove(); cards.delete(ev.id); said.delete(ev.id); return; }
     card.root.classList.remove('is-live');
     setAvatar(card.av, { state: ev.cut ? 'cut' : 'listening' });   // 말이 끝나면 그 감정으로 듣는 자세가 된다
     card.cut = !!ev.cut;
     lastSpeech = { speaker: card.speaker, cut: !!ev.cut };
     const plain = ev.cut ? String(ev.text).replace(/\s*—$/, '') : String(ev.text);
+    const note = said.get(ev.id);
+    if (note) { note.chars = Array.from(plain).length; note.cut = !!ev.cut; note.done = true; refreshStats(); }
     // 출처는 여기서 바로 번호표에 올린다 (다시 볼 때도 같은 순서로 올라가 번호가 같다)
     const cited = collectSources(plain, ev.sources, registry);
     const toggle = cited.length ? sourceToggle(cited, registry) : null;
+    // 생각 보기도 출처처럼 마지막 문장 옆의 아이콘 버튼이다. 누르면 발언 아래에 생각이 펼쳐진다
+    const think = ev.thinking ? h('div', { class: 'sp-think hidden' }, ev.thinking) : null;
+    const thinkBtn = think ? h('button', { type: 'button', class: 'src-btn', tip: '생각 보기', 'aria-label': '생각 보기', 'aria-expanded': 'false' }, icon(Brain, 15)) : null;
+    thinkBtn?.addEventListener('click', () => {
+      const open = think!.classList.toggle('hidden') === false;
+      const label = open ? '생각 접기' : '생각 보기';
+      thinkBtn.dataset.tip = label;
+      thinkBtn.setAttribute('aria-label', label);
+      thinkBtn.setAttribute('aria-expanded', String(open));
+      thinkBtn.classList.toggle('is-on', open);
+    });
     const settle = () => {
       if (!card.root.isConnected) return;
       clear(card.text);
       const tail = renderSpeech(card.text, plain, registry);
       if (ev.cut) tail.append(h('span', { class: 'sp-cut' }, ' —'));
       if (toggle) tail.append(toggle.button);   // 마지막 문장 옆. 자리가 없으면 다음 줄로 넘어간다
+      if (thinkBtn) tail.append(thinkBtn);
     };
     if (!card.started || ev.cut) settle();
     else window.setTimeout(settle, 1500);   // 흘러나오는 움직임이 끝난 뒤 글자 조각을 한 덩어리로 합친다
     const foot = h('div', { class: 'sp-foot' });
     if (ev.cut) foot.append(h('span', { class: 'chip chip--ember' }, '말이 끊김'));
     if (toggle) card.body.append(toggle.panel);
-    if (ev.thinking) {
-      const think = h('div', { class: 'sp-think hidden' }, ev.thinking);
-      foot.append(h('button', { type: 'button', class: 'chip', onclick: () => think.classList.toggle('hidden') }, icon(Brain, 13), '생각 보기'));
-      card.body.append(foot, think);
-    } else if (foot.childElementCount) {
-      card.body.append(foot);
-    }
+    if (foot.childElementCount) card.body.append(foot);
+    if (think) card.body.append(think);
     if (cited.length && tab === 'sources') paintSide();
     const seat = seats.get(card.speaker);
     if (seat && speaking === card.speaker) setAvatar(seat.av, { state: ev.cut ? 'cut' : 'listening' });
@@ -391,7 +601,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         h('div', { class: 'mw-clock', tip: '쓰기 시작한 뒤 지난 시간', 'aria-hidden': 'true' }, icon(Hourglass, 14), elapsed)),
       h('div', { class: 'mw-lines', 'aria-hidden': 'true' }, [0, 1, 2, 3].map(() => h('i', null))));
     waitTimer = window.setInterval(() => { elapsed.textContent = fmtTime((performance.now() - started) / 1000); }, 1000);
-    const below = [minutesEl, verdictEl, qaEl, costEl].find((el) => el?.isConnected);   // 다시 쓰는 중이면 예전 회의록 바로 위에
+    const below = [minutesEl, verdictEl, costEl, qaEl].find((el) => el?.isConnected);   // 다시 쓰는 중이면 예전 회의록 바로 위에
     if (below) below.before(waitEl);
     else inner.append(waitEl);
     if (scroll) waitEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -404,9 +614,55 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     waitEl = null;
   }
 
-  /** 토론 아래에 붙는 카드의 차례: 회의록, 판정, 묻고 답하기, 총 비용. 새로 만든 카드를 제자리에 넣는다. */
+  /** 글 속의 발언 번호(#14)를 누르면 그 발언으로 가는 버튼으로 바꾼다. 화면에 있는 발언의 번호만 바꾼다. */
+  function linkTurns(root: HTMLElement): void {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (/#\d/.test((n as Text).data) && !(n.parentElement?.closest('.turn-ref, button, a, input'))) nodes.push(n as Text);
+    }
+    for (const node of nodes) {
+      const parts = node.data.split(/(#\d{1,3})(?!\d)/);
+      if (parts.length < 2) continue;
+      const frag = document.createDocumentFragment();
+      parts.forEach((part, k) => {
+        const no = k % 2 ? Number(part.slice(1)) : 0;
+        if (no && cards.has(no)) {
+          const who = seats.get(cards.get(no)!.speaker)?.persona.name ?? '';
+          frag.append(h('button', { type: 'button', class: 'turn-ref', 'data-turn': no, tip: `${who}의 발언으로 가기`.trim(), 'aria-label': `${part} ${who}의 발언으로 가기` }, part));
+        } else if (part) frag.append(part);
+      });
+      node.replaceWith(frag);
+    }
+  }
+  inner.addEventListener('click', (e) => {
+    const ref = (e.target as HTMLElement).closest?.('.turn-ref') as HTMLElement | null;
+    const card = ref ? cards.get(Number(ref.dataset.turn))?.root : null;
+    if (card) showCard(card);
+  });
+
+  /** 그 발언을 화면 가운데로 가져와 잠깐 빛나게 한다. 멀리 있으면 가까이까지는 한 번에 건너뛰고 남은 짧은 거리만 움직인다.
+   *  처음부터 끝까지 부드럽게 움직이면 긴 토론에서 몇 초씩 걸린다. */
+  function showCard(card: HTMLElement): void {
+    const NEAR = 260;   // 이 거리만 움직여 보인다 (px)
+    const box = transcript.getBoundingClientRect();
+    const r = card.getBoundingClientRect();
+    const room = transcript.scrollHeight - transcript.clientHeight;
+    const goal = Math.max(0, Math.min(room, transcript.scrollTop + r.top - box.top - Math.max(0, (transcript.clientHeight - r.height) / 2)));
+    const gap = goal - transcript.scrollTop;
+    if (calm.matches) transcript.scrollTop = goal;
+    else {
+      if (Math.abs(gap) > NEAR) transcript.scrollTop = goal - Math.sign(gap) * NEAR;
+      transcript.scrollTo({ top: goal, behavior: 'smooth' });
+    }
+    card.classList.remove('is-flash');
+    void card.offsetWidth;
+    card.classList.add('is-flash');
+  }
+
+  /** 토론 아래에 붙는 카드의 차례: 회의록, 판정, 총 비용, 묻고 답하기. 새로 만든 카드를 제자리에 넣는다. */
   function placeTail(el: HTMLElement): void {
-    const order = [minutesEl, verdictEl, qaEl, costEl];
+    const order = [minutesEl, verdictEl, costEl, qaEl];
     const next = order.slice(order.indexOf(el) + 1).find((x) => x?.isConnected);
     if (next) next.before(el);
     else inner.append(el);
@@ -442,6 +698,9 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
           h('span', { style: `--c:${nameColor(pt.name ?? '')}` }, pt.name ?? ''), h('span', null, pt.point ?? '')])))),
       list('합의 사항', 'agreements'), list('미결 사항', 'open_issues'), list('후속 조치', 'follow_ups'),
       has('conclusion') ? h('div', { class: 'takeaway' }, m.conclusion) : null);
+    linkTurns(minutesEl);
+    if (partial || minutesTimes.length) reveal(minutesEl, minutesTimes);   // 다 쓴 순간에도 나오던 글자는 마저 흘러나온다
+    if (!partial) minutesTimes = [];
     if (opts.scroll) minutesEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
@@ -477,6 +736,9 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       }),
       moment.why ? h('div', { class: 'takeaway' }, h('small', null, `가장 인상적인 장면 · ${moment.turn ?? ''} ${moment.name ?? ''}`), moment.why) : null,
       partial ? null : h('p', { class: 'muted small', style: 'margin-top:1rem' }, '어느 입장이 옳은지가 아니라 누가 토론을 더 잘했는지를 본 AI의 평가입니다.'));
+    linkTurns(verdictEl);
+    if (partial || verdictTimes.length) reveal(verdictEl, verdictTimes);
+    if (!partial) verdictTimes = [];
     if (opts.scroll) verdictEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
@@ -486,8 +748,16 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const draft = (qaEl?.querySelector('.qa-input') as HTMLInputElement | null)?.value ?? '';
     qaEl?.remove();
     const items = h('div', { class: 'qa-list' });
+    // 답은 발언과 같은 표기(굵게, 목록, 표, 막대 그림)로 온다. 토론의 출처 번호와 섞이지 않게 번호표는 따로 쓴다
+    const notes = new CitationRegistry();
+    const write = (answer: HTMLElement, a: string, streaming = false) => {
+      clear(answer);
+      drawSpeech(answer, speechBlocks(parseCitations(a, notes, { streaming }), streaming));
+      linkTurns(answer);   // 답에 나온 발언 번호를 누르면 그 발언으로 간다
+    };
     const item = (q: string, a: string) => {
-      const answer = h('div', { class: 'qa-a' }, a);
+      const answer = h('div', { class: 'qa-a sp-text' });
+      write(answer, a);
       items.append(h('div', { class: 'qa-item' }, h('div', { class: 'qa-q' }, q), answer));
       return answer;
     };
@@ -518,11 +788,11 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       try {
         const res = await api.ask(id, question, (piece) => {
           text2 += piece;
-          answer.textContent = text2;
-          if (stick) transcript.scrollTop = transcript.scrollHeight;
+          write(answer, text2, true);
+          follow();
         });
         record.qa = res.qa;
-        answer.textContent = res.qa[res.qa.length - 1]?.a ?? text2;
+        write(answer, res.qa[res.qa.length - 1]?.a ?? text2);
         applyCost(res);
       } catch (err) {
         row.remove();
@@ -567,18 +837,18 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const t = usage?.total ?? record?.usage;
     const old = costEl;
     const fresh = h('div', { class: `panel frame summary costcard${old ? ' is-redraw' : ''}` },
-      h('div', { class: 'minutes-tag' }, icon(Coins, 16), '총 비용'),
+      h('div', { class: 'minutes-tag' }, icon(Coins, 16), '총 비용',
+        infoTip(`측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`)),
       h('h2', null, fmtCost(money.cost, money.rate)),
       h('div', { class: 'cost-rows' },
         row('토론 (토큰)', p.tokens ?? money.cost, t ? `입력 ${(t.input + t.cached + t.cache_write).toLocaleString()} · 출력 ${t.output.toLocaleString()} 토큰` : ''),
         row('웹 검색', p.search ?? 0, `${money.searches.toLocaleString()}건 × ${fmtCost(money.searchUsd, money.rate)}`),
         (p.prep ?? 0) > 0 ? row('참가자 생성', p.prep) : null,
         (p.minutes ?? 0) > 0 ? row('회의록', p.minutes) : null,
-        (p.extra ?? 0) > 0 ? row('판정과 질문', p.extra, '토론이 끝난 뒤에 든 비용') : null),
-      h('p', { class: 'muted small' }, `측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`));
+        (p.extra ?? 0) > 0 ? row('판정과 질문', p.extra, '토론이 끝난 뒤에 든 비용') : null));
     old?.remove();
-    inner.append(fresh);
     costEl = fresh;
+    placeTail(fresh);   // 묻고 답하기는 비용 아래에 온다
   }
 
   async function writeMinutes(): Promise<void> {
@@ -603,11 +873,12 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     }
   }
 
-  async function judge(): Promise<void> {
+  /** 판정을 받는다. 토론이 끝나면 저절로 부른다(auto). 그때는 화면을 판정 쪽으로 끌어가지 않는다. */
+  async function judge(auto = false): Promise<void> {
     if (judging || !record) return;
     judging = true;
     paintControls();
-    showVerdict({}, { partial: true, scroll: true });
+    showVerdict({}, { partial: true, scroll: !auto });
     try {
       const res = await api.verdict(id, (part) => showVerdict(part, { partial: true }));
       record.verdict = res.verdict;
@@ -693,6 +964,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       case 'speech_start': startSpeech(ev); break;
       case 'delta': addDelta(ev, instant); break;
       case 'search': {
+        searched.set(ev.speaker, (searched.get(ev.speaker) ?? 0) + 1);
         setStatus(ev.speaker, Search, String(ev.query).slice(0, 14));
         window.setTimeout(() => setStatus(ev.speaker, null), 4000);
         break;
@@ -756,6 +1028,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
         paintBadges();
         paintControls();
         if (!instant) { showQa(); showCost(); follow(); }
+        // 판정은 토론이 끝나면 바로 낸다. 중단된 토론과 발언이 거의 없는 토론은 건너뛴다
+        if (!instant && ev.state !== 'aborted' && record && !record.verdict && cards.size >= 2) void judge(true);
         break;
       default: break;
     }
@@ -789,11 +1063,13 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       put(controls,
         canResume ? h('button', { type: 'button', class: 'btn btn--primary', disabled: resuming, tip: '끊긴 곳 다음 발언부터 토론을 이어 갑니다', onclick: () => resumeDebate() },
           icon(resuming ? LoaderCircle : StepForward, 18, resuming ? 'spin' : ''), resuming ? '이어 가는 중' : '이어 하기') : null,
-        h('button', { type: 'button', class: `btn${canResume ? '' : ' btn--primary'}`, disabled: writingMinutes, onclick: () => writeMinutes() },
-          icon(writingMinutes ? LoaderCircle : FileText, 18, writingMinutes ? 'spin' : ''),
-          writingMinutes ? '회의록을 쓰는 중' : record?.minutes ? '회의록 다시 쓰기' : '회의록 쓰기'),
-        h('button', { type: 'button', class: 'btn', disabled: judging, tip: '누가 더 설득력 있게 토론했는지 AI 심사위원의 평가를 받습니다', onclick: () => judge() },
-          icon(judging ? LoaderCircle : Scale, 18, judging ? 'spin' : ''), judging ? '판정하는 중' : record?.verdict ? '다시 판정' : '판정'),
+        // 회의록과 판정은 토론이 끝나면 저절로 나온다. 다시 쓰는 버튼은 두지 않고, 없을 때(예전 토론, 쓰다 실패한 경우)만 받는 버튼을 보인다
+        record?.minutes && !writingMinutes ? null
+          : h('button', { type: 'button', class: `btn${canResume ? '' : ' btn--primary'}`, disabled: writingMinutes, onclick: () => writeMinutes() },
+            icon(writingMinutes ? LoaderCircle : FileText, 18, writingMinutes ? 'spin' : ''), writingMinutes ? '회의록을 쓰는 중' : '회의록 쓰기'),
+        record?.verdict && !judging ? null
+          : h('button', { type: 'button', class: 'btn', disabled: judging, tip: '누가 더 설득력 있게 토론했는지 AI 심사위원의 평가를 받습니다', onclick: () => judge() },
+            icon(judging ? LoaderCircle : Scale, 18, judging ? 'spin' : ''), judging ? '판정하는 중' : '판정'),
         h('button', { type: 'button', class: 'btn', tip: '다른 프로그램에 붙여 넣을 수 있게 마크다운으로 복사합니다', onclick: () => copyAll() },
           icon(Copy, 18), '대화 + 회의록 복사'),
         h('div', { class: 'sep' }),
@@ -839,6 +1115,8 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     clock.shown = 0;
     paintClock();
     cards.clear();
+    said.clear();
+    searched.clear();
     registry.clear();
     track.querySelectorAll('.tick').forEach((t) => t.remove());
     fill.style.width = '0%';
@@ -850,7 +1128,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     clockTurn.textContent = '0';
   }
 
-  /** 토론 아래에 붙는 것들을 한꺼번에 그린다: 회의록, 판정, 묻고 답하기, 총 비용. */
+  /** 토론 아래에 붙는 것들을 한꺼번에 그린다: 회의록, 판정, 총 비용, 묻고 답하기. */
   function showTail(): void {
     if (record?.minutes) showMinutes(record.minutes);
     if (record?.verdict) showVerdict(record.verdict);
@@ -903,11 +1181,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     timeline.setAttribute('aria-valuetext', `#${mark.id} ${mark.name}`);
     if (!replaying) {
       const card = cards.get(mark.id)?.root;
-      if (!card) return;
-      card.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      card.classList.remove('is-flash');
-      void card.offsetWidth;
-      card.classList.add('is-flash');
+      if (card) showCard(card);
       return;
     }
     window.clearTimeout(replayTimer);
@@ -1058,6 +1332,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     disposed = true;
     stream?.close();
     observer.disconnect();
+    cancelAnimationFrame(glide);
     window.clearTimeout(replayTimer);
     window.clearInterval(waitTimer);
     window.clearInterval(clockTimer);

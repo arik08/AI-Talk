@@ -17,6 +17,7 @@ export interface Persona {
   color: string;
   avatar: AvatarSpec;
   tags: string[];
+  fav?: boolean;   // 즐겨 찾는 인물. 서버가 목록을 줄 때 붙인다
   model?: string;
   effort?: string;
 }

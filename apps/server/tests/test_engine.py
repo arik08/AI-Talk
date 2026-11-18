@@ -128,6 +128,19 @@ def test_time_limit_closes_the_debate(monkeypatch):
     assert debate.clock < 4 * 60 + 60
 
 
+def test_debate_clock_counts_the_time_on_screen_at_normal_speed(monkeypatch):
+    """토론 시계는 보통 속도로 화면에 나오는 시간이다. 그래서 보통 속도로 보면 실제 시간과 같이 간다."""
+    from aitalk.engine import CPS, screen_seconds, unit_delay
+    text = "기록이 있어도 나중에 고칠 수 있으면, 증거가 아니라 서류 작업이죠. 그 상당 부분이 얼마인지 말씀해 주세요."
+    shown = sum(unit_delay(word, CPS["normal"]) for word in text.split())   # 엔진이 낱말마다 쉬는 시간의 합
+    assert screen_seconds(text) == pytest.approx(shown)
+    assert 0.8 * len(text) / 14 < screen_seconds(text) < 1.3 * len(text) / 14
+    debate, _ = _run(_config(max_turns=8, gap_scale=1), monkeypatch)
+    expect = sum(screen_seconds(s["text"].removesuffix(" —")) for s in debate.speeches)
+    gaps = debate.clock - expect
+    assert 0 < gaps < 2.0 * len(debate.speeches)   # 발언 사이의 뜸만 더해진다
+
+
 def test_host_order_is_obeyed_by_moderator_and_every_participant(monkeypatch):
     """주최자의 지시는 참고 사항이 아니다: 진행자가 그대로 전하고, 참가자 전원이 각자 다음 발언에서 따른다."""
     seen = []

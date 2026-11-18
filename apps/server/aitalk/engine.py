@@ -39,9 +39,33 @@ from .providers.base import JsonFeed, Provider, ProviderError, Speech, Usage
 MOD_ID = "moderator"
 CPS = {"slow": 8.0, "normal": 14.0, "fast": 26.0}       # 화면에 나오는 속도 (초당 글자)
 GAP_SPEED = {"slow": 1.25, "normal": 1.0, "fast": 0.6, "instant": 0.0}
-SPEECH_CPS = 5.5                                         # 토론 시계용: 사람이 말하는 속도
+CLOCK_CPS = 15.0       # 토론 시계 어림용: 보통 속도에서 쉼까지 쳐서 1초에 나오는 글자 수 (아직 안 나온 글의 길이를 잴 때)
+CLOSING_SECONDS = 9    # 마무리 발언 하나에 남겨 두는 토론 시계
 GAPS = {"interject": 0.15, "rebut": 0.6, "ask": 0.9, "add": 1.1, "agree": 1.0, "shift": 1.6,
         "moderate": 1.4, "statement": 1.2, "open": 0.6, "closing": 1.3, "wrap": 1.5, "answer": 0.8}
+
+
+def unit_delay(unit: str, cps: float) -> float:
+    """낱말 하나를 화면에 내보낸 뒤 쉬는 시간. 쉼표와 문장 끝에서는 조금 더 쉰다."""
+    delay = max(len(unit.strip()), 1) / cps
+    tail = unit.rstrip()[-1:] if unit.strip() else ""
+    factor = 14.0 / cps
+    if tail in ",，、":
+        delay += 0.16 * factor
+    elif tail in ".?!…。":
+        delay += 0.36 * factor
+    return delay
+
+
+def screen_seconds(text: str) -> float:
+    """토론 시계의 단위: 이 글이 보통 속도로 화면에 다 나오는 데 걸리는 시간.
+
+    보통 속도로 보면 시계가 실제 시간과 같이 간다. 빠르게·즉시로 보면 그만큼 시계가 빨리 간다.
+    모델의 응답 속도와는 상관없이 글만으로 정해지므로, 어느 속도로 보든 같은 토론은 같은 길이다.
+    """
+    return sum(unit_delay(word, CPS["normal"]) for word in text.split())
+
+
 AWAY_SECONDS = 12      # 보는 사람이 없어진 뒤 이만큼 지나면 토론을 멈춘다
 REACT_AT = 0.3         # 앞 발언이 이만큼 화면에 나왔을 때 연출자를 부른다
 RETRY_WAITS = (2.0, 6.0)   # AI 호출이 실패했을 때 스스로 다시 시도하기 전에 기다리는 시간(초). 이 횟수만큼만 한다
@@ -60,6 +84,62 @@ class Turn:
     mood: str = "calm"
     interject: bool = False
     scripted: bool = False
+
+
+HANGUL = re.compile(r"[가-힣]")
+# 한국어로 적은 계획 메모의 표시: "…의 마지막 발언이므로 검색 없이 바로 작성합니다. 2~4문장, 짧고 단호한 말투로…"
+KO_NOTE = re.compile(r"발언이므로|작성합니다|작성하겠습니다|"
+                     r"\d\s*[~\-]\s*\d\s*문장|말투로[,.]|검색 없이|검색하지 않고|지시에 따라|반복하지 않습니다|되풀이하지 않습니다|"
+                     r"길이\s*[:：]")
+SENTENCE_END = re.compile(r"[.!?…。]")
+LEAD_HOLD = 60   # 첫 문장이 이만큼 길어지도록 끝나지 않으면 발언으로 보고 내보낸다
+
+
+class LeadFilter:
+    """발언 앞에 붙어 나오는 계획 메모를 걸러 낸다.
+
+    생각 칸을 쓰지 않는 모델은 한국어 발언 앞에 "Opening statement, 2-4 sentences, Korean…" 같은 영어 메모를
+    글로 적을 때가 있다. 한글이 한 글자도 없는 앞쪽 줄은 발언이 아니라고 보고 내보내지 않는다.
+    메모를 한국어로 적을 때도 있다("…의 마지막 발언이므로 검색 없이 바로 작성합니다. 2~4문장…"). 발언을 어떻게 쓸지를
+    말하는 줄(KO_NOTE)은 그 줄이 끝날 때까지 붙들었다가 버린다. 그래서 첫 문장이 끝나기 전에는 내보내지 않는다.
+    발언이 시작되면 그 뒤로는 받는 대로 흘려보낸다. 끝까지 발언이 나오지 않으면 걸러 낸 글이 곧 발언이므로 통째로 내보낸다.
+    """
+
+    def __init__(self) -> None:
+        self.buf = ""
+        self.open = False
+        self.dropped = ""
+
+    def feed(self, piece: str) -> str:
+        if self.open:
+            return piece
+        self.buf += piece
+        while True:
+            line, sep, rest = self.buf.partition("\n")
+            note = not HANGUL.search(line) or KO_NOTE.search(line)
+            if not note and (sep or len(line) >= LEAD_HOLD or SENTENCE_END.search(line)):
+                self.open = True   # 첫 문장까지 보았는데 메모가 아니다: 발언이 시작됐다
+                out, self.buf = self.buf, ""
+                return out
+            if not sep:
+                return ""          # 줄이 끝나거나 첫 문장이 끝날 때까지 붙든다
+            if line.strip():
+                self.dropped += line + "\n"
+            self.buf = rest
+
+    def finish(self) -> str:
+        if self.open:
+            return ""
+        self.open = True
+        out, self.buf, self.dropped = self.dropped + self.buf, "", ""
+        return out
+
+
+def strip_lead(text: str) -> tuple[str, str]:
+    """(걸러 낸 메모, 발언) 한 쌍으로 나눈다."""
+    f = LeadFilter()
+    body = f.feed(text) + f.finish()
+    return f.dropped.strip(), body
 
 
 class Gen:
@@ -113,6 +193,7 @@ class Debate:
         self.last_spoke: dict[str, int] = {}
         self.last_speaker: Optional[dict] = None
         self.last_interject = -99
+        self.heat = 0   # 날 선 발언이 몇 번 이어졌는지
         self.last_mod = -99
         self.milestones: set[str] = set()
         self.rr = 0
@@ -448,7 +529,7 @@ class Debate:
         if self.cfg.get("max_turns"):
             parts.append(self.turn_no / self.cfg["max_turns"])
         if self.cfg.get("max_minutes"):
-            parts.append((self.clock + extra_chars / SPEECH_CPS) / (self.cfg["max_minutes"] * 60))
+            parts.append((self.clock + extra_chars / CLOCK_CPS) / (self.cfg["max_minutes"] * 60))
         return max(parts)
 
     def _should_close(self, extra_chars: int) -> bool:
@@ -458,8 +539,8 @@ class Debate:
         if self.cfg.get("max_turns") and self.turn_no + reserve >= self.cfg["max_turns"]:
             return True
         if self.cfg.get("max_minutes"):
-            now = self.clock + extra_chars / SPEECH_CPS
-            if now + reserve * 22 >= self.cfg["max_minutes"] * 60:
+            now = self.clock + extra_chars / CLOCK_CPS
+            if now + reserve * CLOSING_SECONDS >= self.cfg["max_minutes"] * 60:
                 return True
         return False
 
@@ -571,9 +652,11 @@ class Debate:
         gen = Gen(turn)
         speaker = turn.speaker
 
+        sieve = LeadFilter() if self.cfg.get("language") != "en" else None
+
         def on_event(kind: str, payload: Any) -> None:
             if kind == "text":
-                gen.text += payload
+                gen.text += sieve.feed(payload) if sieve else payload
             elif kind == "search":
                 gen.searches.append(str(payload))
             gen.changed.set()
@@ -583,7 +666,8 @@ class Debate:
             try:
                 await self._gate()
                 private = speaker.get("hidden", "") if self.cfg.get("hidden_agenda", True) else ""
-                hint = prompts.TONE_HINT.get(self.cfg.get("tone") or "default", "")
+                tone = self.cfg.get("tone") or "default"
+                hint = f"{prompts.TONE_HINT.get(tone, '')} {prompts.character_hint(speaker, tone)}".strip()
                 order = self._order_for(speaker)
                 speech = await self.ctx.speak(
                     speaker=speaker["name"], directive=f"{order} {turn.directive} {hint}".strip(), private=private,
@@ -591,6 +675,11 @@ class Debate:
                 if not speech.text.strip():
                     raise ProviderError("모델이 빈 발언을 돌려주었습니다.")
                 self._note_latency("speech", time.monotonic() - started)
+                if sieve:
+                    gen.text += sieve.finish()
+                    notes, speech.text = strip_lead(speech.text)
+                    if notes:   # 발언 앞의 메모는 발언이 아니라 생각이다
+                        speech.thinking = f"{speech.thinking.strip()}\n\n{notes}".strip()
                 # 화면에 이미 나간 글자와 자리가 어긋나지 않게 맞춘다
                 raw = gen.text
                 lead = len(raw) - len(raw.lstrip())
@@ -625,21 +714,16 @@ class Debate:
                   by={k: v.to_dict() for k, v in self.usage_by.items()}, calls=dict(self.calls))
 
     # ------------------------------------------------------------------ 보여 주기
-    def _gap(self, turn: Turn) -> float:
-        scale = float(self.cfg.get("gap_scale", 1.0)) * GAP_SPEED.get(self.speed, 1.0)
+    def _gap_base(self, turn: Turn) -> float:
+        """보통 속도에서 이 발언 앞에 두는 뜸."""
         key = "interject" if turn.interject else (turn.intent if turn.kind == "free" else turn.kind)
-        return GAPS.get(key, 1.0) * scale * self.rng.uniform(0.75, 1.25)
+        return GAPS.get(key, 1.0) * float(self.cfg.get("gap_scale", 1.0))
+
+    def _gap(self, turn: Turn) -> float:
+        return self._gap_base(turn) * GAP_SPEED.get(self.speed, 1.0) * self.rng.uniform(0.75, 1.25)
 
     def _unit_delay(self, unit: str) -> float:
-        cps = CPS.get(self.speed, 14.0)
-        delay = max(len(unit.strip()), 1) / cps
-        tail = unit.rstrip()[-1:] if unit.strip() else ""
-        factor = 14.0 / cps
-        if tail in ",，、":
-            delay += 0.16 * factor
-        elif tail in ".?!…。":
-            delay += 0.36 * factor
-        return delay
+        return unit_delay(unit, CPS.get(self.speed, 14.0))
 
     async def _present(self, gen: Gen) -> None:
         turn, speaker = gen.turn, gen.turn.speaker
@@ -706,7 +790,7 @@ class Debate:
         shown = gen.text[: self._pos].rstrip()
         final = shown + " —" if cut else shown
         speech = gen.speech or Speech()
-        seconds = len(shown) / SPEECH_CPS + GAPS.get(turn.kind, 1.0)
+        seconds = screen_seconds(shown) + self._gap_base(turn)
         started_at = round(self.clock)   # 이 발언이 시작된 토론 시계. 회의록의 시간대별 정리에 쓴다
         self.clock += seconds
         self.last_spoke[speaker["id"]] = sid
@@ -904,10 +988,15 @@ class Debate:
             return Turn(self.mod, "moderate",
                         f"진행자가 나설 때입니다. 상황: {reason} 논점을 한 문장으로 정리하고, 토론이 앞으로 나아가게 "
                         "구체적인 질문을 던지거나 다른 참가자에게 발언권을 넘기세요. 2~3문장.", "free")
+        # 두 사람만 주고받는 중이면(가-나-가) 이번에는 다른 사람이 끼어들기 쉽게 한다
+        recent = [s["speaker"] for s in self.speeches[-2:]] + [last["id"]]
+        duel = recent[-2] if len(recent) == 3 and recent[0] == recent[2] != recent[1] else ""
         scores: dict[str, float] = {}
         for p in self.people:
             row = by_id[p["id"]]
             score = float(row["urge"])
+            if p["id"] == duel and len(self.people) > 2:
+                score -= 3
             if p["id"] == last["id"]:
                 score -= 6                                    # 방금 말한 사람은 감점
             if verdict["addressed"] == p["id"]:
@@ -925,13 +1014,14 @@ class Debate:
         if target is None and intent in ("rebut", "ask", "agree") and last["id"] not in (MOD_ID, speaker["id"]):
             target = last
         tname = f"{target['name']} 님" if target else ""
+        sharp = "날카로운" if row["mood"] in ("heated", "skeptical") else "궁금한 것을 묻는"
         lines = {
             "rebut": f"{tname}의 방금 주장에 반박하세요. 상대가 한 구체적인 말을 짚으세요." if target
                      else "지금까지 나온 주장 가운데 가장 동의하기 어려운 것에 반박하세요.",
             "add": f"{tname}의 말에 보충하거나, 다른 각도의 근거를 더하세요." if target
                    else "지금까지의 논의에 새 근거나 사례를 보충하세요.",
-            "ask": f"{tname}에게 날카로운 질문을 하나 던지세요. 왜 묻는지도 짧게 밝히세요." if target
-                   else "다른 참가자 한 명을 골라 날카로운 질문을 던지세요.",
+            "ask": f"{tname}에게 {sharp} 질문을 하나 던지세요. 왜 묻는지도 짧게 밝히세요." if target
+                   else f"다른 참가자 한 명을 골라 {sharp} 질문을 던지세요.",
             "agree": f"{tname}의 말 가운데 동의하는 부분을 밝히고, 거기에 자신의 생각을 한 걸음 더하세요." if target
                      else "앞선 발언 가운데 동의하는 부분을 밝히고 자신의 생각을 더하세요.",
             "shift": "논의가 한쪽으로 쏠렸습니다. 아직 다루지 않은 측면으로 화제를 넘기세요.",
@@ -954,8 +1044,14 @@ class Debate:
             if key != "short" and intent in ("add", "rebut") and self.style_rng.random() < prompts.FORM_CHANCE:
                 directive += " " + prompts.FORM_HINT   # 근거를 펼 만한 발언에만, 가끔
         edge = prompts.edge_hint(row["mood"], intent, self.cfg.get("tone") or "default")
-        if edge and self.style_rng.random() < prompts.EDGE_CHANCE:   # 발언마다 날을 세우면 말싸움만 남는다
-            directive += " " + edge
+        fight = row["mood"] in ("heated", "skeptical") and intent in ("rebut", "ask")
+        if fight and self.heat >= prompts.COOL_AFTER:   # 날 선 공방이 이어졌다: 이번에는 온도를 낮춘다
+            directive += " " + prompts.COOL_HINT
+            self.heat = 0
+        else:
+            self.heat = self.heat + 1 if fight else 0
+            if edge and self.style_rng.random() < prompts.EDGE_CHANCE:   # 발언마다 날을 세우면 말싸움만 남는다
+                directive += " " + edge
         return Turn(speaker, "free", directive, "free", intent=intent,
                     target=target["id"] if target else "", mood=row["mood"], interject=interject)
 

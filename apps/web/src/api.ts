@@ -78,6 +78,9 @@ export const api = {
   personas: () => request<Persona[]>('/api/personas'),
   savePersona: (p: Persona) => request<Persona>('/api/personas', json(p)),
   deletePersona: (id: string) => request<{ ok: boolean }>(`/api/personas/${id}`, { method: 'DELETE' }),
+  favoritePersona: (id: string, on: boolean) => request<{ id: string; fav: boolean }>(`/api/personas/${id}/favorite`, json({ on })),
+  /** 말로 적은 조건에 맞는 보관함 인물을 AI가 추천한다. 잘 맞는 순서로, 까닭 한 줄과 함께 온다. */
+  suggestPersonas: (query: string) => request<{ picks: { id: string; why: string }[]; cost?: number }>('/api/personas/suggest', json({ query })),
   importPersonas: (items: unknown[]) => request<{ added: number }>('/api/personas/import', json(items)),
   draftPersona: (hint: string) => request<Partial<Persona>>('/api/personas/draft', json({ hint })),
   cast: (body: { topic: string; concept?: string; tone?: string; count: number; policy: string; fixed: Partial<Persona>[]; materials: string; model?: string; effort?: string }) =>
@@ -85,6 +88,9 @@ export const api = {
   /** 새로 만들지 않고 보관함의 인물 가운데 주제에 맞는 사람을 골라, 입장만 주제에 맞춰 받는다. */
   castLibrary: (body: { topic: string; concept?: string; tone?: string; count: number; policy: string; picked?: string[]; materials: string; model?: string; effort?: string }) =>
     request<{ personas: Persona[]; cost?: number; library: number; asked: number }>('/api/cast/library', json(body)),
+  /** 참가자는 그대로 두고, 바뀐 주제에 맞춰 각자의 관점·핵심 주장·양보 지점만 새로 받는다. 보낸 순서대로 돌아온다. */
+  castRefresh: (body: { topic: string; concept?: string; tone?: string; policy: string; participants: Partial<Persona>[]; materials: string; model?: string; effort?: string }) =>
+    request<{ personas: Partial<Persona>[]; cost?: number }>('/api/cast/refresh', json(body)),
   uploadMaterial: (file: File) => {
     const form = new FormData();
     form.append('file', file);

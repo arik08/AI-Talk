@@ -72,7 +72,7 @@ export function mountSettings(root: HTMLElement, ctx: AppContext): () => void {
               h('code', null, `http://${ip}:${s.network!.port}`))),
             s.network.code
               ? h('p', { class: 'muted small' }, '다른 PC에서 들어오면 접속 코드를 묻습니다.')
-              : h('div', { class: 'banner', style: 'margin:.75rem 0 0' }, '접속 코드가 없습니다. 같은 망의 누구나 들어와 내 AI 키로 토론을 돌리고 기록을 지울 수 있습니다. .env에 AITALK_ACCESS_CODE를 넣으면 코드를 아는 사람만 들어옵니다.'))
+              : null)
           : h('p', { class: 'muted' }, '지금은 이 PC에서만 접속됩니다 (', h('code', null, '.env'), '에 ', h('code', null, 'AITALK_HOST=127.0.0.1'),
             '이 있습니다). 그 줄을 지우고 ', h('code', null, 'ai-talk.bat'), '으로 다시 켜면 다른 PC에서도 들어올 수 있습니다.')) : null,
       s?.models.length ? h('div', { class: 'panel card-pad', style: 'margin-top:1.5rem' },

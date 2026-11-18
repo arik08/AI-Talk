@@ -2,12 +2,14 @@ import {
   ChevronRight, ClipboardPaste, Drama, FileText, Globe, Library, RotateCcw, LoaderCircle, Minus, Play, Plus, RefreshCw, Save, Shuffle, Sparkles, Square, SquareCheck, Upload, Users,
 } from 'lucide';
 import { api } from '../api';
+import { spreadColors } from '../colors';
 import { AVATAR_SETS, RANDOM_SETS, createAvatar, normalizeSpec, pickAvatars, setAvatar } from '../avatar/avatar';
 import type { AppContext } from '../main';
 import { PALETTE, type AvatarSet, type Mood, type Persona } from '../types';
-import { clear, deleteButton, fmtUsd, h, icon, put, safeColor, toast } from '../ui/dom';
+import { aiSearch, arrangeRows, type Pick } from '../ui/aiSearch';
+import { clear, deleteButton, favButton, fmtUsd, h, icon, put, safeColor, toast } from '../ui/dom';
 
-interface Slot extends Persona { fromLibrary?: boolean }
+interface Slot extends Persona { fromLibrary?: boolean; ownColor?: string }   // ownColor: 앞사람과 겹쳐 색을 바꾸기 전의 자기 색
 interface Material { name: string; text: string; chars: number; tokens: number }
 
 const draft = {
@@ -20,6 +22,7 @@ const draft = {
   policy: 'auto',
   avatarSet: 'bot' as AvatarSet | 'mix',
   cast: [] as (Slot | null)[],
+  stanceTopic: '',   // 참가자들의 입장을 마지막으로 맞춘 때의 주제. 지금 주제와 많이 다르면 "입장 새로 맞추기"를 강조한다
   moderator: true,
   mode: 'mixed',
   turnsOn: true, maxTurns: 30,
@@ -35,21 +38,39 @@ const draft = {
   perSpeaker: false,
   badge: 'on',
   summary: true,
-  reactions: 'smart',
+  reactions: 'all',
   tone: 'default',
   hiddenAgenda: null as boolean | null,
 };
+
+const TOPIC_SHIFT = 6;   // 주제가 이만큼(글자 수) 넘게 고쳐지면 입장을 다시 맞출 때가 됐다고 본다
+const squash = (text: string): string => text.replace(/\s+/g, '');   // 띄어쓰기와 줄바꿈의 차이는 세지 않는다
+
+/** 두 글이 몇 글자 다른지(고쳐 쓰기·넣기·빼기의 수). limit에 닿으면 더 세지 않고 limit을 돌려준다. */
+function editDistance(a: string, b: string, limit: number): number {
+  const x = Array.from(a).slice(0, 600);
+  const y = Array.from(b).slice(0, 600);
+  if (Math.abs(x.length - y.length) >= limit) return limit;
+  let row = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i += 1) {
+    const next = [i];
+    for (let j = 1; j <= y.length; j += 1) next.push(Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1)));
+    row = next;
+  }
+  return Math.min(row[y.length], limit);
+}
 
 /* 진행 설정은 이 브라우저에 기억해 두고 다음에 그대로 쓴다. 쓰던 초안(주제, 자료, 참가자)은 아래에서 따로 기억한다. */
 const SETTING_KEYS = ['count', 'policy', 'avatarSet', 'moderator', 'mode', 'turnsOn', 'maxTurns', 'minutesOn', 'maxMinutes',
   'length', 'speed', 'interjection', 'gapScale', 'search', 'maxSearches', 'model', 'effort', 'perSpeaker', 'badge', 'summary',
   'reactions', 'tone', 'hiddenAgenda'] as const;
 const STORE_KEY = 'aitalk.settings.v1';
+const CLOCK_BASIS = 2;   // 토론 시계의 기준. 2: 보통 속도로 화면에 나오는 시간 (그 전에는 사람이 말하는 속도였다)
 const pick = (): Record<string, unknown> => Object.fromEntries(SETTING_KEYS.map((k) => [k, (draft as any)[k]]));
 const DEFAULTS = pick();
 
 function persist(): void {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(pick())); } catch { /* 저장이 막혀 있어도 화면은 그대로 쓴다 */ }
+  try { localStorage.setItem(STORE_KEY, JSON.stringify({ ...pick(), clock: CLOCK_BASIS })); } catch { /* 저장이 막혀 있어도 화면은 그대로 쓴다 */ }
   saveDraft();
 }
 
@@ -61,7 +82,7 @@ let droppedMaterials = 0;   // 지난번에 너무 커서 기억하지 못한 �
 
 function saveDraftNow(): void {
   window.clearTimeout(draftTimer);
-  const body = { topic: draft.topic, concept: draft.concept, urls: draft.urls, cast: draft.cast, prepCost: draft.prepCost };
+  const body = { topic: draft.topic, concept: draft.concept, urls: draft.urls, cast: draft.cast, prepCost: draft.prepCost, stanceTopic: draft.stanceTopic };
   try {
     localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...body, materials: draft.materials }));
   } catch {   // 자료가 커서 저장 한도를 넘으면 자료만 빼고 기억한다
@@ -89,6 +110,7 @@ function restoreDraft(): void {
       draft.cast = saved.cast.slice(0, 10).map((p: any) => (p && typeof p.name === 'string' && p.name && p.avatar && Array.isArray(p.claims) ? p as Slot : null));
     }
     if (typeof saved.prepCost === 'number' && saved.prepCost > 0) draft.prepCost = saved.prepCost;
+    draft.stanceTopic = typeof saved.stanceTopic === 'string' ? saved.stanceTopic : draft.topic;   // 예전 초안은 지금 주제에 맞춰져 있다고 본다
     droppedMaterials = Number(saved.dropped) || 0;
   } catch { /* 깨진 값은 무시한다 */ }
 }
@@ -105,6 +127,8 @@ function restore(): void {
       if (value === undefined) continue;
       if (base === null ? (value === null || typeof value === 'boolean') : typeof value === typeof base) (draft as any)[k] = value;
     }
+    // 토론 시계의 기준이 바뀌기 전에 기억된 기본값 20분은 새 기본값으로 옮긴다 (같은 분량이 새 기준으로는 8분쯤이다)
+    if (saved.clock !== CLOCK_BASIS && draft.maxMinutes === 20) draft.maxMinutes = 10;
     if (!['auto', 'off'].includes(draft.search)) draft.search = 'auto';
     if (!['default', 'humorous', 'serious', 'creative'].includes(draft.tone)) draft.tone = 'default';
     if (!['auto', 'short', 'normal', 'long'].includes(draft.length)) draft.length = 'auto';
@@ -163,7 +187,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   /* ---- 주제 ---- */
   const topic = h('textarea', {
     class: 'topic-input', placeholder: '토론할 주제를 적어 주세요. 한 줄도 좋고, 배경을 몇 문단 적어도 좋습니다.', rows: 3,
-    oninput: () => { draft.topic = topic.value; paintStart(); },
+    oninput: () => { draft.topic = topic.value; paintStart(); paintNudge(); },
   });
   topic.value = draft.topic;
   const concept = h('textarea', {
@@ -178,7 +202,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     !status ? h('div', { class: 'banner' }, '서버에 연결하지 못했습니다. 서버가 켜져 있는지 확인하세요.') : null,
     h('div', { class: 'panel frame topic-box' }, topic,
       h('div', { class: 'topic-foot' }, h('span', { class: 'muted small' }, '예시'),
-        EXAMPLES.map((text) => h('button', { type: 'button', class: 'chip', onclick: () => { topic.value = text; draft.topic = text; paintStart(); topic.focus(); } }, text)))),
+        EXAMPLES.map((text) => h('button', { type: 'button', class: 'chip', onclick: () => { topic.value = text; draft.topic = text; paintStart(); paintNudge(); topic.focus(); } }, text)))),
     h('div', { class: 'panel concept-box' },
       h('div', { class: 'concept-label' }, icon(Drama, 18), '컨셉과 분위기', h('small', null, '선택. 어떤 자리인지, 어떤 분위기인지. 주제에 못 적은 배경이나 바라는 점도 좋습니다. 참가자 모두에게 똑같이 적용됩니다')),
       concept,
@@ -257,23 +281,28 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   const policy = h('select', { class: 'select', style: 'width:auto', onchange: () => { draft.policy = policy.value; persist(); } },
     ([['auto', '알아서 구성'], ['balanced', '찬반 균형'], ['stakeholders', '여러 이해관계자'], ['experts', '전문가 패널']] as const)
       .map(([v, l]) => h('option', { value: v, selected: draft.policy === v }, l)));
-  const genBtn = h('button', { type: 'button', class: 'btn', onclick: () => generateAll() }, icon(Sparkles, 18), '자동 생성');
+  // 참가자를 채우는 세 가지: 가상 인물을 새로 만들기, 보관함의 페르소나에서 고르기, 지금 있는 사람들의 입장만 주제에 다시 맞추기
+  const genBtn = h('button', { type: 'button', class: 'btn', onclick: () => generateAll(),
+    tip: '주제에 맞춘 가상 인물을 AI가 새로 만듭니다. 지금 있는 참가자는 모두 새 가상 인물로 바뀝니다' }, icon(Sparkles, 18), '가상 인물 생성');
   const pickBtn = h('button', { type: 'button', class: 'btn pick-btn', 'aria-haspopup': 'true', onclick: () => togglePickMenu(),
-    tip: '새로 만들지 않고 보관함의 인물로 구성합니다. 직접 고르거나, 주제에 어울리는 사람을 AI가 고르게 할 수 있습니다' }, icon(Library, 18), '보관함에서 구성');
+    tip: '새로 만들지 않고 보관함의 페르소나로 구성합니다. 직접 고르거나 AI가 고르게 할 수 있고, 고른 사람의 입장은 주제에 맞춰집니다' }, icon(Library, 18), '페르소나 선택');
   const pickWrap = h('div', { class: 'pick-wrap' }, pickBtn);
+  const refreshBtn = h('button', { type: 'button', class: 'btn', onclick: () => refreshStances(),
+    tip: '참가자는 그대로 두고, 지금 주제에 맞춰 각자의 관점·핵심 주장·양보 지점만 새로 씁니다. 주제를 바꿨을 때 누르세요' }, icon(RefreshCw, 18), '입장 새로 맞추기');
   let picking = false;   // 보관함에서 고르는 중인지 (자동 생성과 구분해 버튼에 보여 준다)
+  let refreshing = false;   // 입장만 새로 맞추는 중인지
   const chosen = new Set<string>();   // 보관함 목록에서 직접 체크한 인물. 남은 자리만 AI가 고른다
   const castGrid = h('div', { class: 'cast-grid' });
   const swapAvatar = new Map<number, () => void>();   // 카드를 다시 그리지 않고 그 자리의 아바타만 바꾸는 함수
   const bulkBar = h('div', { class: 'panel bulk-bar hidden' });
   const countNote = h('span', { class: 'muted small' });
   page.append(h('section', { class: 'block' },
-    h('h2', { class: 'block-title' }, '참가자', h('small', null, '주제에 맞춰 AI가 만들거나, 보관함에서 고릅니다')),
+    h('h2', { class: 'block-title' }, '참가자', h('small', null, '가상 인물을 새로 만들거나, 보관함의 페르소나에서 고릅니다. 주제를 바꿨으면 입장만 새로 맞출 수 있습니다')),
     h('div', { class: 'cast-bar' },
       h('div', { class: 'stepper' }, minus, countLabel, plus), policy,
       seg<AvatarSet | 'mix'>([...RANDOM_SETS.map((s) => [s.id, s.label] as [AvatarSet, string]), ['mix', '섞어서']],
         () => draft.avatarSet, (v) => { draft.avatarSet = v; reassignAvatars(); }),
-      genBtn, pickWrap, toggle('진행자', () => draft.moderator, (v) => { draft.moderator = v; }), countNote),
+      genBtn, pickWrap, refreshBtn, toggle('진행자', () => draft.moderator, (v) => { draft.moderator = v; }), countNote),
     bulkBar, castGrid));
 
   function setCount(n: number): void {
@@ -306,23 +335,22 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     if (!draft.topic.trim()) { toast('주제를 먼저 적어 주세요.', 'error'); topic.focus(); return false; }
     if (busy) return false;
     busy = true;
-    const kept = draft.cast.filter((p): p is Slot => !!p && !!p.fromLibrary);
+    // 지금 있는 참가자는 페르소나에서 고른 사람까지 모두 새 가상 인물로 바꾼다.
+    // 페르소나를 남긴 채 입장만 바꾸는 일은 "입장 새로 맞추기"가 한다
     draft.cast.forEach((_, i) => loading.add(i));
     paintCast();
     try {
       const { personas, cost } = await api.cast({
-        topic: draft.topic, concept: draft.concept, tone: draft.tone, count: draft.count, policy: draft.policy, fixed: kept,
+        topic: draft.topic, concept: draft.concept, tone: draft.tone, count: draft.count, policy: draft.policy, fixed: [],
         materials: draft.materials.map((m) => m.text).join('\n\n').slice(0, 6000),
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
       draft.prepCost += cost ?? 0;
+      draft.stanceTopic = draft.topic;
       const picks = pickAvatars(draft.count, draft.avatarSet);
       draft.cast = Array.from({ length: draft.count }, (_, i) => {
         const p = personas[i];
-        if (!p) return null;
-        const slot = dress(p, i, picks[i]);
-        if (i < kept.length) { slot.fromLibrary = true; slot.color = kept[i].color; slot.avatar = kept[i].avatar; }
-        return slot;
+        return p ? dress({ ...p, id: undefined }, i, picks[i]) : null;
       });
       return true;
     } catch (err) {
@@ -330,6 +358,59 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       return false;
     } finally {
       busy = false;
+      loading.clear();
+      paintCast();
+    }
+  }
+
+  /** 참가자의 입장을 맞춘 뒤로 주제가 눈에 띄게 바뀌었으면 "입장 새로 맞추기"를 은근히 강조한다.
+   *  띄어쓰기나 한두 글자 고친 것에는 반응하지 않는다: 고친 글자가 TOPIC_SHIFT자 이상일 때만이다. */
+  function paintNudge(): void {
+    const stale = draft.cast.some(Boolean) && !!draft.topic.trim() && editDistance(squash(draft.stanceTopic), squash(draft.topic), TOPIC_SHIFT) >= TOPIC_SHIFT;
+    refreshBtn.classList.toggle('btn--nudge', stale);
+    refreshBtn.dataset.tip = stale
+      ? '주제가 바뀌었습니다. 누르면 참가자는 그대로 두고, 지금 주제에 맞춰 각자의 관점·핵심 주장·양보 지점만 새로 씁니다'
+      : '참가자는 그대로 두고, 지금 주제에 맞춰 각자의 관점·핵심 주장·양보 지점만 새로 씁니다. 주제를 바꿨을 때 누르세요';
+  }
+
+  /** 참가자는 그대로 두고, 지금 주제에 맞춰 각자의 관점·핵심 주장·양보 지점만 새로 받는다. 빈 자리는 건드리지 않는다. */
+  async function refreshStances(): Promise<boolean> {
+    if (!draft.topic.trim()) { toast('주제를 먼저 적어 주세요.', 'error'); topic.focus(); return false; }
+    if (busy) return false;
+    const seats = draft.cast.map((p, i) => (p ? i : -1)).filter((i) => i >= 0);
+    if (!seats.length) { toast('입장을 맞출 참가자가 없습니다. 먼저 참가자를 채워 주세요.', 'error'); return false; }
+    busy = true;
+    refreshing = true;
+    seats.forEach((i) => loading.add(i));
+    paintCast();
+    try {
+      const { personas, cost } = await api.castRefresh({
+        topic: draft.topic, concept: draft.concept, tone: draft.tone, policy: draft.policy,
+        participants: seats.map((i) => {
+          const { name, title, expertise, personality, speech, viewpoint, claims, concede } = draft.cast[i]!;
+          return { name, title, expertise, personality, speech, viewpoint, claims, concede };
+        }),
+        materials: draft.materials.map((m) => m.text).join('\n\n').slice(0, 6000),
+        model: draft.model || undefined, effort: draft.effort || undefined,
+      });
+      draft.prepCost += cost ?? 0;
+      draft.stanceTopic = draft.topic;
+      seats.forEach((i, k) => {
+        const next = personas[k];
+        const slot = draft.cast[i];
+        if (!next || !slot) return;
+        slot.viewpoint = next.viewpoint ?? slot.viewpoint;
+        slot.claims = next.claims?.length ? next.claims : slot.claims;
+        slot.concede = next.concede ?? slot.concede;
+      });
+      toast(`${seats.length}명의 입장을 지금 주제에 맞췄습니다.`);
+      return true;
+    } catch (err) {
+      toast((err as Error).message, 'error');
+      return false;
+    } finally {
+      busy = false;
+      refreshing = false;
       loading.clear();
       paintCast();
     }
@@ -351,6 +432,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
       draft.prepCost += cost ?? 0;
+      draft.stanceTopic = draft.topic;
       if (personas.length < draft.count) {
         toast(`보관함에 인물이 ${size}명뿐이라 ${personas.length}명으로 구성했습니다.`);
         draft.count = Math.max(2, personas.length);
@@ -382,7 +464,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       const fresh = personas[others.length];
       if (fresh) {
         const old = draft.cast[index];
-        draft.cast[index] = dress({ ...fresh, color: old?.color ?? PALETTE[index % PALETTE.length] }, index, old?.avatar);
+        draft.cast[index] = dress({ ...fresh, color: old?.ownColor ?? old?.color ?? PALETTE[index % PALETTE.length] }, index, old?.avatar);
       }
     } catch (err) {
       toast((err as Error).message, 'error');
@@ -398,10 +480,25 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   function togglePickMenu(): void {
     if (menu?.classList.contains('pick-menu')) { closeMenu(); return; }
     closeMenu();
-    const people = library.filter((p) => p.id);
+    const all = library.filter((p) => p.id);
+    const people = [...all.filter((p) => p.fav), ...all.filter((p) => !p.fav)];   // 즐겨 찾는 인물이 앞에 온다. 메뉴가 열려 있는 동안은 순서를 바꾸지 않는다
     for (const id of chosen) if (!people.some((p) => p.id === id)) chosen.delete(id);
     const box = h('div', { class: 'menu pick-menu' });
     menu = box;
+    // 검색창은 한 번만 만들고, 글자를 칠 때는 목록을 다시 그리지 않고 안 맞는 줄만 숨긴다.
+    // 검색창 안의 반짝이 버튼을 켜면 찾는 사람을 말로 적어 AI의 추천을 받는다 (추천한 순서대로, 까닭과 함께)
+    let query = '';
+    let picks: Pick[] | null = null;
+    let rowEls: HTMLElement[] = [];   // rowEls[i]는 people[i]의 줄
+    const none = h('div', { class: 'pick-none muted' }, '찾는 인물이 없습니다');
+    const sift = (list: HTMLElement) => {
+      none.hidden = arrangeRows(people, rowEls, list, null, query, picks) > 0 || !people.length;
+    };
+    const search = aiSearch({
+      onText: (q) => { query = q; sift(box.querySelector('.pick-list') as HTMLElement); },
+      onPicks: (p) => { picks = p; sift(box.querySelector('.pick-list') as HTMLElement); },
+      onCost: (cost) => { draft.prepCost += cost; saveDraft(); },
+    }).root;
     const paint = () => {
       const room = Math.min(draft.count, people.length);
       while (chosen.size > room) chosen.delete([...chosen].pop()!);   // 정원을 줄였으면 나중에 고른 사람부터 뺀다
@@ -416,23 +513,26 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         void pickFromLibrary(picked);
       } }, icon(Sparkles, 18), h('span', null, h('div', null, '자동선택'), h('div', { class: 'muted' }, note)));
       const list = h('div', { class: 'pick-list', role: 'group', 'aria-label': '직접 넣을 인물' });
+      rowEls = [];
       for (const p of people) {
         const on = chosen.has(p.id!);
         const av = createAvatar(p.avatar, p.color, 32);
         av.classList.add('is-still');
-        list.append(h('button', { type: 'button', role: 'checkbox', 'aria-checked': String(on), class: on ? 'is-on' : '',
+        rowEls.push(h('div', { class: 'pick-row' }, h('button', { type: 'button', role: 'checkbox', 'aria-checked': String(on), class: on ? 'is-on' : '',
           disabled: !on && left <= 0, onclick: () => {
             if (on) chosen.delete(p.id!); else chosen.add(p.id!);
             const top = list.scrollTop;
             paint();
-            const next = box.querySelector('.pick-list') as HTMLElement;
-            next.scrollTop = top;
-            (next.children[people.indexOf(p)] as HTMLElement).focus();
+            (box.querySelector('.pick-list') as HTMLElement).scrollTop = top;
+            (rowEls[people.indexOf(p)].firstElementChild as HTMLElement).focus();
           } }, icon(on ? SquareCheck : Square, 18, 'pick-check'), av,
-          h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))));
+          h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))),
+          favButton(p, (fav) => api.favoritePersona(p.id!, fav), { cls: '' })));
       }
+      sift(list);
       box.replaceChildren(auto,
-        h('div', { class: 'pick-count muted' }, `직접 고르기 ${chosen.size} / ${room}명`), list);
+        h('div', { class: 'pick-count muted' }, `직접 고르기 ${chosen.size} / ${room}명`),
+        h('div', { class: 'pick-search' }, search), list, none);
     };
     paint();
     pickWrap.append(box);
@@ -442,21 +542,39 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     closeMenu();
     const used = new Set(draft.cast.filter(Boolean).map((p) => p!.id).filter(Boolean));
     menu = h('div', { class: 'menu' });
-    const items = library.filter((p) => !used.has(p.id));
+    const free = library.filter((p) => !used.has(p.id));
+    const items = [...free.filter((p) => p.fav), ...free.filter((p) => !p.fav)];
     if (!items.length) menu.append(h('div', { class: 'muted small', style: 'padding:.5rem .625rem' }, '고를 인물이 없습니다. 페르소나 메뉴에서 만들 수 있습니다.'));
+    const rows: HTMLElement[] = [];
+    const none = h('div', { class: 'muted small', style: 'padding:.5rem .625rem', hidden: true }, '찾는 인물이 없습니다');
+    const box = menu;
+    let query = '';
+    let picks: Pick[] | null = null;
+    const sift = () => { none.hidden = arrangeRows(items, rows, box, none, query, picks) > 0; };
+    const search = aiSearch({
+      onText: (q) => { query = q; sift(); },
+      onPicks: (p) => { picks = p; sift(); },
+      onCost: (cost) => { draft.prepCost += cost; saveDraft(); },
+    }).root;
+    if (items.length) menu.append(h('div', { class: 'menu-search' }, search));
     for (const p of items) {
       const av = createAvatar(p.avatar, p.color, 32);
       av.classList.add('is-still');
-      menu.append(h('button', { type: 'button', onclick: () => {
+      rows.push(h('div', { class: 'pick-row' }, h('button', { type: 'button', onclick: () => {
         draft.cast[index] = { ...dress(p, index), fromLibrary: true };
         closeMenu();
         paintCast();
-      } }, av, h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))));
+      } }, av, h('span', null, h('div', null, p.name), h('div', { class: 'muted' }, p.title))),
+        favButton(p, (fav) => api.favoritePersona(p.id!, fav), { cls: '' })));
     }
+    menu.append(...rows, none);
     const card = anchor.closest('.pcard') as HTMLElement;
     card.append(menu);
     menu.style.left = '1rem';
     menu.style.bottom = '3.25rem';
+    // 아래에 맞춰 자리를 잡은 뒤 위쪽을 못박는다: 찾아서 목록이 짧아져도 검색창은 제자리에 있고 메뉴 아래쪽만 줄어든다
+    menu.style.top = `${menu.offsetTop}px`;
+    menu.style.bottom = 'auto';
   }
   const onDocClick = (e: MouseEvent) => {
     const target = e.target as HTMLElement;   // 체크하면 목록을 다시 그리므로, 눌린 줄이 이미 화면에서 빠졌으면 메뉴 안을 누른 것이다
@@ -517,19 +635,30 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         : `지금 전원이 ${shortModel(draft.model)} · ${draft.effort}입니다. 한 모델로 통일하면 캐시 할인이 가장 큽니다`));
   }
 
+  /** 앞사람과 색이 겹치거나 비슷한 사람은 보이는 색만 바꾼다. 자기 색은 기억해 두어, 겹침이 풀리면 돌아온다. */
+  function tintCast(): void {
+    const own = draft.cast.map((p) => (p ? (p.ownColor ??= p.color) : null));
+    spreadColors(own, PALETTE).forEach((color, i) => { if (color) draft.cast[i]!.color = color; });
+  }
+
   function paintCast(): void {
+    tintCast();
     countLabel.textContent = `${draft.count}명`;
     minus.disabled = draft.count <= 2;
     plus.disabled = draft.count >= 10;
     countNote.textContent = draft.count > 5 ? '5명이 넘으면 한 사람의 발언 기회가 줄어듭니다' : '';
     genBtn.disabled = busy;
     clear(genBtn);
-    const making = busy && !picking;
-    genBtn.append(icon(making ? LoaderCircle : Sparkles, 18, making ? 'spin' : ''), making ? '만드는 중' : draft.cast.some(Boolean) ? '다시 자동 생성' : '자동 생성');
+    const making = busy && !picking && !refreshing;
+    genBtn.append(icon(making ? LoaderCircle : Sparkles, 18, making ? 'spin' : ''), making ? '만드는 중' : '가상 인물 생성');
+    refreshBtn.disabled = busy || !draft.cast.some(Boolean);
+    paintNudge();
+    clear(refreshBtn);
+    refreshBtn.append(icon(refreshing ? LoaderCircle : RefreshCw, 18, refreshing ? 'spin' : ''), refreshing ? '맞추는 중' : '입장 새로 맞추기');
     pickBtn.disabled = busy;
     if (busy && menu?.classList.contains('pick-menu')) closeMenu();
     clear(pickBtn);
-    pickBtn.append(icon(picking ? LoaderCircle : Library, 18, picking ? 'spin' : ''), picking ? '고르는 중' : '보관함에서 구성');
+    pickBtn.append(icon(picking ? LoaderCircle : Library, 18, picking ? 'spin' : ''), picking ? '고르는 중' : '페르소나 선택');
     paintBulk();
     clear(castGrid);
     swapAvatar.clear();
@@ -561,8 +690,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
         p.viewpoint ? h('div', { class: 'pcard-view' }, p.viewpoint) : null,
         p.claims.length ? h('ul', { class: 'pcard-claims' }, p.claims.slice(0, 3).map((c) => h('li', null, c))) : null,
         h('div', { class: 'pcard-meta' },
-          p.personality ? h('span', { class: 'chip', tip: '성격과 토론 스타일' }, p.personality.length > 22 ? `${p.personality.slice(0, 22)}…` : p.personality) : null,
-          p.fromLibrary ? h('span', { class: 'chip chip--c', tip: '자동 생성을 눌러도 인물은 그대로 두고 입장만 주제에 맞춥니다' }, '보관함 인물') : null),
+          p.personality ? h('span', { class: 'chip chip--line', tip: p.personality, 'data-tip-title': '성격과 토론 스타일' }, p.personality) : null),
         draft.perSpeaker ? modelSelects(p) : null,
         h('div', { class: 'pcard-foot' },
           h('div', { class: 'grow' }),
@@ -577,8 +705,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
           libBtn,
           h('button', { type: 'button', class: 'btn btn--icon', tip: '보관함에 저장', 'aria-label': '보관함에 저장', onclick: async () => {
             try {
-              const { fromLibrary: _f, model: _m, effort: _e, ...rest } = p;
-              const saved = await api.savePersona(rest as Persona);
+              const { fromLibrary: _f, model: _m, effort: _e, ownColor, ...rest } = p;
+              const saved = await api.savePersona({ ...rest, color: ownColor ?? rest.color } as Persona);   // 보관함에는 자기 색으로
               p.id = saved.id;
               library = await api.personas();
               toast(`${p.name} 님을 보관함에 저장했습니다.`);
@@ -644,7 +772,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       field('진행 방식', seg([['mixed', '혼합'], ['free', '자유'], ['sequential', '순차']], () => draft.mode, (v) => { draft.mode = v; }),
         '혼합: 모두발언은 차례대로, 그 뒤는 말하고 싶은 사람이'),
       field('턴 수 제한', turnsRow, '슬라이더는 100턴까지, 숫자로는 200턴까지 적을 수 있습니다'),
-      field('시간 제한', minutesRow, '실제로 말했다면 걸렸을 시간으로 잽니다. 둘 중 먼저 닿는 쪽에서 마무리합니다'),
+      field('시간 제한', minutesRow, '보통 속도로 볼 때 걸리는 시간으로 잽니다. 둘 중 먼저 닿는 쪽에서 마무리합니다'),
       field('분위기', seg([['default', '기본'], ['humorous', '유머러스'], ['serious', '진지함'], ['creative', '창의적']], () => draft.tone, (v) => { draft.tone = v; }),
         '기본: 분위기에 대한 지시 없이 그대로 진행합니다'),
       field('발언 길이', seg([['auto', '자동'], ['short', '짧게'], ['normal', '보통'], ['long', '길게']], () => draft.length, (v) => { draft.length = v; }),
@@ -653,7 +781,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       field('웹 검색', seg([['auto', '자동'], ['off', '끔']], () => draft.search, (v) => { draft.search = v; }),
         '자동: 참가자가 필요하다고 판단할 때만 스스로 검색합니다. 검색한 만큼 요금이 따로 듭니다')),
     h('details', { class: 'adv' },
-      h('summary', null, icon(ChevronRight, 16), '고급 설정'),
+      h('summary', null, icon(ChevronRight, 16), '고급 설정',
+        h('span', { class: 'adv-hint' }, '모델과 추론 노력 · 끼어들기 · 발언 사이 뜸 · 검색 횟수 · 회의록 · 아바타 반응 · 숨은 속내')),
       h('div', { class: 'settings-grid' },
         field('모델', modelSel, '공통 설정입니다. 참가자, 진행자, 연출자가 모두 이 모델을 씁니다. 요금은 100만 토큰당 원화입니다'),
         field('추론 노력', effortSel),
@@ -676,7 +805,8 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
   /* ---- 시작 ---- */
   const startNote = h('span', { class: 'muted' });
   const startBtn = h('button', { type: 'button', class: 'btn btn--primary btn--lg', onclick: () => start() }, icon(Play, 20), '토론 시작');
-  page.append(h('div', { class: 'start-bar' }, startNote, startBtn));
+  page.append(h('div', { class: 'start-bar' }, startNote, startBtn),
+    h('div', { class: 'credit' }, '제작 : 경영기획DX추진TF팀 오명철'));
 
   function paintStart(): void {
     persist();
@@ -705,8 +835,9 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       const { id } = await api.startDebate({
         topic: draft.topic, concept: draft.concept, tone: draft.tone, materials: draft.materials.map((m) => ({ name: m.name, text: m.text })), urls: draft.urls,
         participants: draft.cast.map((p, i) => {
-          const { fromLibrary: _f, ...rest } = p!;
-          return { ...rest, id: `s${i + 1}`, model: draft.perSpeaker ? rest.model : undefined, effort: draft.perSpeaker ? rest.effort : undefined };
+          const { fromLibrary, ownColor: _o, fav: _fav, ...rest } = p!;   // 토론에는 겹치지 않게 바꾼 색이 간다
+          // library: 보관함에서 온 인물. 보는 사람이 아는 캐릭터라, 그 사람다움이 발언에 더 드러나게 한다
+          return { ...rest, library: !!fromLibrary, id: `s${i + 1}`, model: draft.perSpeaker ? rest.model : undefined, effort: draft.perSpeaker ? rest.effort : undefined };
         }),
         moderator: draft.moderator, mode: draft.mode,
         max_turns: draft.turnsOn ? draft.maxTurns : null, max_minutes: draft.minutesOn ? draft.maxMinutes : null,
