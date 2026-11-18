@@ -947,6 +947,9 @@ class Debate:
                          + directive + " 길이: 1~2문장.")
         else:
             directive += " " + self._len(row.get("length", ""))
+        edge = prompts.edge_hint(row["mood"], intent, self.cfg.get("tone") or "default")
+        if edge and self.rng.random() < prompts.EDGE_CHANCE:   # 발언마다 날을 세우면 말싸움만 남는다
+            directive += " " + edge
         return Turn(speaker, "free", directive, "free", intent=intent,
                     target=target["id"] if target else "", mood=row["mood"], interject=interject)
 

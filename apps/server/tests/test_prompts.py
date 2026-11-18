@@ -34,6 +34,25 @@ def test_concept_and_tone_are_separate_sections():
     assert "심야 라디오 토론" in text
 
 
+def test_rules_ask_for_spoken_endings_and_varied_temperaments():
+    rules = prompts.RULES
+    assert "'~합니다', '~했습니다'로만" in rules and "~잖아요" in rules
+    for kind in ("비꼬는 사람", "해명과 변명부터", "말을 돌려 피하는 사람", "물고 늘어지는 사람"):
+        assert kind in rules
+    assert "발언마다 날을 세우지는 않습니다" in rules and "욕설이나 혐오 표현을 쓰지 않습니다" in rules
+    assert "방어적인 사람" in prompts.CAST_SYSTEM and "싸움꾼만 모으지도 않습니다" in prompts.CAST_SYSTEM
+
+
+def test_edge_hint_follows_mood_intent_and_tone():
+    assert prompts.edge_hint("heated", "rebut", "default") == prompts.EDGE_HINT["heated"]
+    assert prompts.edge_hint("skeptical", "ask", "humorous") == prompts.EDGE_HINT["skeptical"]
+    assert prompts.edge_hint("amused", "add", "default") == prompts.EDGE_HINT["amused"]
+    assert prompts.edge_hint("heated", "agree", "default") == ""      # 동의·보충하는 발언에서는 날을 세우지 않는다
+    assert prompts.edge_hint("calm", "rebut", "default") == ""
+    assert prompts.edge_hint("heated", "rebut", "serious") == ""      # 진지한 분위기는 논증으로만
+    assert all(" 님" not in h for h in prompts.EDGE_HINT.values())    # 시험용 AI가 '님' 앞의 낱말을 상대 이름으로 읽는다
+
+
 def test_director_instructions_live_in_the_shared_part_not_the_tail():
     shared = _shared()
     tail = prompts.director_question(["가온", "나래"], "가온")
