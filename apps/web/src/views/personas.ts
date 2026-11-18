@@ -40,7 +40,7 @@ export function mountPersonas(root: HTMLElement, _ctx: AppContext): () => void {
 
   root.append(h('div', { class: 'page' },
     h('div', { class: 'page-head' },
-      h('div', null, h('h1', null, '페르소나 보관함'), h('p', null, '여기 둔 인물은 어느 토론에나 불러 쓸 수 있습니다. 입장은 토론마다 주제에 맞춰 새로 정해집니다.')),
+      h('div', null, h('h1', null, '페르소나 보관함'), h('p', null, '여기 둔 인물은 어느 토론에나 불러 쓸 수 있습니다. 입장은 토론마다 주제에 맞춰 새로 정해집니다. 실존 인물과 역사 속 인물은 널리 알려진 생각과 말투를 본뜬 AI의 재현이며, 실제 그 사람의 발언이 아닙니다.')),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'btn', onclick: () => fileInput.click() }, icon(Upload, 18), '가져오기'), fileInput,
         h('button', { type: 'button', class: 'btn', onclick: exportAll }, icon(Download, 18), '내보내기'),

@@ -57,3 +57,33 @@ def test_debate_round_trip_and_minutes_update(tmp_path, monkeypatch):
     assert len(store.list_debates()) == 2
     store.delete_debate("d_one")
     assert store.load_debate("d_one") is None
+
+
+def test_presets_are_the_famous_people_set():
+    import json
+    people = json.loads((store.PRESETS / "personas.json").read_text(encoding="utf-8"))
+    names = [p["name"] for p in people]
+    for name in ("일론 머스크", "스티브 잡스", "워런 버핏", "소크라테스", "니콜로 마키아벨리", "장 자크 루소", "박태준",
+                 "박정희", "이순신", "세종대왕", "마하트마 간디", "샘 올트먼", "도널드 트럼프",
+                 "프리드리히 니체", "이마누엘 칸트", "노자", "나폴레옹", "블라디미르 푸틴", "시진핑", "아이작 뉴턴", "정주영", "이건희"):
+        assert name in names, name
+    assert len(names) == len(set(names)) == 22
+    for p in people:
+        assert p["id"].startswith("preset_") and p["title"] and p["personality"] and p["speech"] and len(p["claims"]) >= 2
+        assert p["hidden"] == ""          # 실존 인물에게 숨은 속내를 지어 붙이지 않는다
+
+
+def test_old_preset_set_is_replaced_once_and_own_personas_are_kept(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    store.list_personas()
+    mine = store.save_persona({"name": "내가 만든 인물", "title": "직접 만듦"})
+    store.save_persona({"id": "preset_engineer", "name": "강도현", "title": "예전 기본 인물"})
+    store.set_meta("presets", "1")                    # 예전 묶음을 쓰던 보관함인 것처럼
+    monkeypatch.setattr(store, "_ready_for", None)    # 서버를 다시 켠다
+    names = [p["name"] for p in store.list_personas()]
+    assert "강도현" not in names and "일론 머스크" in names and "내가 만든 인물" in names
+    assert len(names) == 23
+    store.delete_persona("preset_musk")
+    monkeypatch.setattr(store, "_ready_for", None)
+    assert "일론 머스크" not in [p["name"] for p in store.list_personas()]   # 지운 기본 인물은 되살아나지 않는다
+    assert mine["id"] in [p["id"] for p in store.list_personas()]

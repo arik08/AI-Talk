@@ -75,19 +75,41 @@ def _connect() -> sqlite3.Connection:
     return con
 
 
-def _first_run(con: sqlite3.Connection) -> None:
-    """처음 한 번: 예전 JSON 파일을 옮기고, 보관함이 비어 있으면 기본 인물을 넣는다."""
-    if con.execute("SELECT 1 FROM meta WHERE key = 'seeded'").fetchone():
-        return
-    legacy = DB.parent / "personas.json"
-    people = _read_json(legacy, None) if legacy.exists() else None
-    if people is None:
-        people = _read_json(PRESETS / "personas.json", [])
+PRESET_SET = "3"   # 기본 인물 묶음의 판. 묶음을 바꿀 때 올린다 (2: 유명인 13명, 3: 22명)
+
+
+def _insert_presets(con: sqlite3.Connection, people: list) -> None:
     for i, p in enumerate(reversed(people)):
         if isinstance(p, dict) and p.get("name"):
             p = {**p, "id": p.get("id") or new_id("p")}
             con.execute("INSERT OR IGNORE INTO personas (id, name, data, sort, updated) VALUES (?, ?, ?, ?, ?)",
                         (p["id"], p["name"], json.dumps(p, ensure_ascii=False), i, _now()))
+
+
+def _refresh_presets(con: sqlite3.Connection) -> None:
+    """기본 인물 묶음이 바뀌었으면 예전 기본 인물(id가 preset_로 시작)을 지우고 새 묶음을 넣는다.
+
+    직접 만든 인물은 건드리지 않는다. 한 번만 한다: 그 뒤에 지운 기본 인물은 되살아나지 않는다.
+    """
+    row = con.execute("SELECT value FROM meta WHERE key = 'presets'").fetchone()
+    if row and row["value"] == PRESET_SET:
+        return
+    con.execute("DELETE FROM personas WHERE substr(id, 1, 7) = 'preset_'")
+    _insert_presets(con, _read_json(PRESETS / "personas.json", []))
+    con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('presets', ?)", (PRESET_SET,))
+
+
+def _first_run(con: sqlite3.Connection) -> None:
+    """처음 한 번: 예전 JSON 파일을 옮기고, 보관함이 비어 있으면 기본 인물을 넣는다."""
+    if con.execute("SELECT 1 FROM meta WHERE key = 'seeded'").fetchone():
+        _refresh_presets(con)
+        return
+    legacy = DB.parent / "personas.json"
+    people = _read_json(legacy, None) if legacy.exists() else None
+    if people is None:
+        people = _read_json(PRESETS / "personas.json", [])
+    _insert_presets(con, people)
+    con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('presets', ?)", (PRESET_SET,))
     old_debates = DB.parent / "debates"
     if old_debates.exists():
         for path in old_debates.glob("*.json"):
