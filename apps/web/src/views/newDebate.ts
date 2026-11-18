@@ -263,7 +263,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       .map(([v, l]) => h('option', { value: v, selected: draft.policy === v }, l)));
   // 참가자를 채우는 세 가지: 가상 인물을 새로 만들기, 보관함의 페르소나에서 고르기, 지금 있는 사람들의 입장만 주제에 다시 맞추기
   const genBtn = h('button', { type: 'button', class: 'btn', onclick: () => generateAll(),
-    tip: '주제에 맞춘 가상 인물을 AI가 새로 만듭니다. 페르소나에서 고른 인물은 그대로 두고 입장만 맞춥니다' }, icon(Sparkles, 18), '가상 인물 생성');
+    tip: '주제에 맞춘 가상 인물을 AI가 새로 만듭니다. 지금 있는 참가자는 모두 새 가상 인물로 바뀝니다' }, icon(Sparkles, 18), '가상 인물 생성');
   const pickBtn = h('button', { type: 'button', class: 'btn pick-btn', 'aria-haspopup': 'true', onclick: () => togglePickMenu(),
     tip: '새로 만들지 않고 보관함의 페르소나로 구성합니다. 직접 고르거나 AI가 고르게 할 수 있고, 고른 사람의 입장은 주제에 맞춰집니다' }, icon(Library, 18), '페르소나 선택');
   const pickWrap = h('div', { class: 'pick-wrap' }, pickBtn);
@@ -315,12 +315,13 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     if (!draft.topic.trim()) { toast('주제를 먼저 적어 주세요.', 'error'); topic.focus(); return false; }
     if (busy) return false;
     busy = true;
-    const kept = draft.cast.filter((p): p is Slot => !!p && !!p.fromLibrary);
+    // 지금 있는 참가자는 페르소나에서 고른 사람까지 모두 새 가상 인물로 바꾼다.
+    // 페르소나를 남긴 채 입장만 바꾸는 일은 "입장 새로 맞추기"가 한다
     draft.cast.forEach((_, i) => loading.add(i));
     paintCast();
     try {
       const { personas, cost } = await api.cast({
-        topic: draft.topic, concept: draft.concept, tone: draft.tone, count: draft.count, policy: draft.policy, fixed: kept,
+        topic: draft.topic, concept: draft.concept, tone: draft.tone, count: draft.count, policy: draft.policy, fixed: [],
         materials: draft.materials.map((m) => m.text).join('\n\n').slice(0, 6000),
         model: draft.model || undefined, effort: draft.effort || undefined,
       });
@@ -328,10 +329,7 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
       const picks = pickAvatars(draft.count, draft.avatarSet);
       draft.cast = Array.from({ length: draft.count }, (_, i) => {
         const p = personas[i];
-        if (!p) return null;
-        const slot = dress(p, i, picks[i]);
-        if (i < kept.length) { slot.fromLibrary = true; slot.color = kept[i].ownColor ?? kept[i].color; slot.avatar = kept[i].avatar; }
-        return slot;
+        return p ? dress({ ...p, id: undefined }, i, picks[i]) : null;
       });
       return true;
     } catch (err) {
