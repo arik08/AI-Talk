@@ -99,10 +99,12 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     h('footer', { class: 'dock' }, timeline, controls));
   root.append(stage);
 
-  // 맨 아래를 따라갈 때는 한 번에 뛰지 않고, 남은 거리의 일정 비율씩 다가간다 (저역 통과 필터처럼).
-  // 회의록처럼 긴 덩어리가 한꺼번에 붙어도 화면이 턱턱 끊기지 않고 미끄러지듯 내려간다
-  const GLIDE_MS = 220;        // 남은 거리가 약 37%로 줄어드는 데 걸리는 시간
+  // 맨 아래를 따라갈 때는 한 번에 뛰지 않고, 용수철에 끌려가듯 속도를 서서히 올리고 서서히 줄인다 (2차 저역 통과 필터).
+  // 남은 거리의 일정 비율씩 다가가는 방식(1차)은 줄이 하나 늘 때마다 최고 속도로 출발해 턱턱 끊겨 보였다.
+  // 속도가 이어지므로 줄이 잇달아 늘면 움직임이 서로 겹쳐 한결같은 속도로 흘러내린다
+  const GLIDE_MS = 320;        // 따라붙는 빠르기. 크면 느긋하고 부드럽고, 작으면 바짝 따라붙는다
   let glide = 0;               // 돌고 있는 requestAnimationFrame
+  let glideSpeed = 0;          // 지금 내려가는 속도 (px/ms)
   let glidePos = 0;            // 소수점까지 들고 있는 위치 (scrollTop은 정수로 깎일 수 있다)
   let glideSet = -1;           // 우리가 마지막으로 넣은 scrollTop. 이것과 다르면 사용자가 움직인 것이다
   let glideAt = 0;
@@ -111,18 +113,27 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     if (glide && Math.abs(transcript.scrollTop - glideSet) < 2) return;   // 우리가 움직인 것
     stick = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 120;
     glidePos = transcript.scrollTop;
+    glideSpeed = 0;
   });
   const glideStep = (now: number) => {
     const goal = transcript.scrollHeight - transcript.clientHeight;
     const gap = goal - glidePos;
-    if (!stick || gap < 0.5) {
+    if (!stick || (gap < 0.5 && glideSpeed < 0.01)) {
       if (stick) transcript.scrollTop = goal;
       glide = 0;
+      glideSpeed = 0;
       return;
     }
-    const dt = Math.min(now - glideAt, 100);
+    let left = Math.min(now - glideAt, 100);
     glideAt = now;
-    glidePos += Math.max(gap * (1 - Math.exp(-dt / GLIDE_MS)), Math.min(gap, 0.5));
+    const w = 1 / GLIDE_MS;
+    while (left > 0) {   // 임계 감쇠 용수철. 프레임이 길어도 흔들리지 않게 잘게 나눠 계산한다
+      const dt = Math.min(left, 8);
+      left -= dt;
+      glideSpeed += (w * w * (goal - glidePos) - 2 * w * glideSpeed) * dt;
+      glidePos += glideSpeed * dt;
+    }
+    if (glidePos >= goal) { glidePos = goal; glideSpeed = 0; }   // 목표를 지나치지 않는다
     transcript.scrollTop = glidePos;
     glideSet = transcript.scrollTop;
     glide = requestAnimationFrame(glideStep);
@@ -133,6 +144,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     if (glide) return;
     glidePos = transcript.scrollTop;
     glideSet = glidePos;
+    glideSpeed = 0;
     glideAt = performance.now();
     glide = requestAnimationFrame(glideStep);
   };
