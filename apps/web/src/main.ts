@@ -8,7 +8,7 @@ import './styles/avatar.css';
 import { History, KeyRound, MessagesSquare, Moon, Settings, Sun, Users } from 'lucide';
 import { api } from './api';
 import type { Status } from './types';
-import { clear, h, icon, installTooltips } from './ui/dom';
+import { clear, h, icon, installFullscreen, installTooltips } from './ui/dom';
 import { mountHistory } from './views/history';
 import { mountNewDebate } from './views/newDebate';
 import { mountPersonas } from './views/personas';
@@ -58,6 +58,7 @@ app.append(
   view,
 );
 installTooltips();
+installFullscreen();   // 앱을 켤 때 한 번만 건다
 
 const ctx: AppContext = {
   status: null,

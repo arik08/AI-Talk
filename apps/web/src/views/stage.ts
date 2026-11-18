@@ -1,16 +1,18 @@
 import {
-  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, Link, ListOrdered, LoaderCircle, Megaphone, Pause, PenLine, Play,
+  BookOpen, Brain, Coins, Copy, FileText, Flag, Hourglass, ListOrdered, LoaderCircle, Megaphone, Pause, PenLine, Play,
   Rewind, Search, Send, SkipForward, TriangleAlert, Zap, type IconNode,
 } from 'lucide';
 import { api } from '../api';
+import { CitationRegistry, collectSources, parseCitations } from '../citations';
 import { createAvatar, setAvatar } from '../avatar/avatar';
 import { copyText, recordToMarkdown } from '../export';
 import type { AppContext } from '../main';
 import { INTENT_LABEL, MOOD_LABEL, TONE_LABEL, type DebateEvent, type DebateRecord, type Mood, type Persona } from '../types';
 import { clear, fmtCost, fmtTime, h, icon, put, safeColor, toast, USD_KRW } from '../ui/dom';
+import { citeLink, renderCited, segmentNodes, sourceList, sourceToggle } from '../ui/sources';
 
 interface Seat { persona: Persona; tile: HTMLElement; av: HTMLElement; urge: HTMLElement; status: HTMLElement; badge: HTMLElement }
-interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; av: HTMLElement; speaker: string; cut: boolean; started: boolean }
+interface Card { root: HTMLElement; text: HTMLElement; body: HTMLElement; av: HTMLElement; speaker: string; cut: boolean; started: boolean; raw: string; shown: string }
 
 const SPEEDS: [string, string][] = [['slow', '느리게'], ['normal', '보통'], ['fast', '빠르게'], ['instant', '즉시']];
 const CPS: Record<string, number> = { slow: 8, normal: 14, fast: 26 };   // 서버가 글자를 내보내는 속도와 같다
@@ -18,7 +20,7 @@ const CPS: Record<string, number> = { slow: 8, normal: 14, fast: 26 };   // 서�
 export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () => void {
   const seats = new Map<string, Seat>();
   const cards = new Map<number, Card>();
-  const sources = new Map<string, string>();
+  const registry = new CitationRegistry();   // 출처 번호표: 이 토론 전체에서 URL마다 번호 하나
   let record: DebateRecord | null = null;
   let stream: EventSource | null = null;
   let lastIndex = -1;
@@ -114,9 +116,10 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
           h('span', null, `${u.output.toLocaleString()} 토큰`)])),
         h('p', { class: 'muted small', style: 'margin-top:1rem' }, `측정된 토큰 수와 검색 건수에 공개 단가를 곱한 값입니다. 웹 검색은 건당 ${fmtCost(money.searchUsd, money.rate)}, 1달러 ${money.rate.toLocaleString()}원으로 계산했습니다.`));
     } else if (tab === 'sources') {
-      if (!sources.size) { sideBody.append(h('p', { class: 'muted' }, '웹에서 찾은 출처가 없습니다.')); return; }
-      sideBody.append(h('div', { class: 'src-list' }, Array.from(sources, ([url, title]) =>
-        h('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, title || url))));
+      if (!registry.size) { sideBody.append(h('p', { class: 'muted' }, '웹에서 찾은 출처가 없습니다.')); return; }
+      const list = sourceList(registry.list(), registry);
+      sideBody.append(list.root);
+      if (!side.classList.contains('is-closed')) list.refresh();   // 보이는 동안에만 실제 제목을 조회한다
     } else {
       const mats = record?.config.materials ?? [];
       const concept = record?.config.concept;
@@ -126,7 +129,11 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       if (concept) sideBody.append(h('h4', null, '설정과 분위기'), h('div', { class: 'brief', style: 'margin-bottom:1rem' }, concept));
       if (mats.length) sideBody.append(h('h4', null, '올린 문서'), h('div', { class: 'kv', style: 'margin-bottom:1rem' },
         mats.flatMap((m: any) => [h('span', null, m.name), h('span', null, `${Number(m.chars).toLocaleString()}자`)])));
-      if (briefing) sideBody.append(h('h4', null, '진행자의 사전 조사'), h('div', { class: 'brief' }, briefing));
+      if (briefing) {
+        const brief = h('div', { class: 'brief' });
+        renderCited(brief, briefing, registry);
+        sideBody.append(h('h4', null, '진행자의 사전 조사'), brief);
+      }
     }
   }
 
@@ -234,7 +241,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const cls = ['sp', 'is-live', ev.interject ? 'sp--interject' : '', p.id === 'moderator' ? 'sp--mod' : ''].filter(Boolean).join(' ');
     const rootEl = h('article', { class: cls, style: `--c:${color}` }, av, body);
     inner.append(rootEl);
-    cards.set(ev.id, { root: rootEl, text, body, av, speaker: ev.speaker, cut: false, started: false });
+    cards.set(ev.id, { root: rootEl, text, body, av, speaker: ev.speaker, cut: false, started: false, raw: '', shown: '' });
     follow();
   }
 
@@ -243,15 +250,38 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const card = cards.get(ev.id);
     if (!card) return;
     if (!card.started) { clear(card.text); card.started = true; }
-    const chars = Array.from(String(ev.text));
-    if (instant || speed === 'instant' || chars.length > 80) {
-      card.text.append(ev.text);
-    } else {
-      const step = Math.min(1000 / (CPS[speed] ?? 14) / (replaying ? replayRate : 1), 600 / chars.length);
-      const frag = document.createDocumentFragment();
-      chars.forEach((ch, i) => frag.append(h('span', { class: 'ch', style: `animation-delay:${Math.round(i * step)}ms` }, ch)));
-      card.text.append(frag);
+    // 받은 글 전체를 다시 읽어 링크를 각주로 바꾼다. 아직 닫히지 않은 링크와 내부 표식은 보여 주지 않는다
+    card.raw += String(ev.text);
+    const segments = parseCitations(card.raw, registry, { streaming: true });
+    const drawn = segments.map((s) => (s.kind === 'text' ? s.text : `\u0000${s.n}\u0000`)).join('');
+    if (!drawn.startsWith(card.shown)) {   // 앞에 그린 글이 달라졌으면 통째로 다시 그린다
+      clear(card.text);
+      card.text.append(...segmentNodes(segments));
+      card.shown = drawn;
+      follow();
+      return;
     }
+    const fresh = drawn.slice(card.shown.length);
+    card.shown = drawn;
+    const count = Array.from(fresh).length;
+    const quick = instant || speed === 'instant' || count > 80;
+    const step = count ? Math.min(1000 / (CPS[speed] ?? 14) / (replaying ? replayRate : 1), 600 / count) : 0;
+    const frag = document.createDocumentFragment();
+    let at = 0;
+    fresh.split(/\u0000(\d+)\u0000/).forEach((part, index) => {
+      if (index % 2) {   // 각주 번호
+        const entry = registry.list()[Number(part) - 1];
+        if (entry) frag.append(citeLink(entry.n, entry.url));
+      } else if (quick) {
+        frag.append(part);
+      } else {
+        for (const ch of Array.from(part)) {
+          frag.append(h('span', { class: 'ch', style: `animation-delay:${Math.round(at * step)}ms` }, ch));
+          at += 1;
+        }
+      }
+    });
+    card.text.append(frag);
     follow();
   }
 
@@ -264,21 +294,21 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     card.cut = !!ev.cut;
     lastSpeech = { speaker: card.speaker, cut: !!ev.cut };
     const plain = ev.cut ? String(ev.text).replace(/\s*—$/, '') : String(ev.text);
+    // 출처는 여기서 바로 번호표에 올린다 (다시 볼 때도 같은 순서로 올라가 번호가 같다)
+    const cited = collectSources(plain, ev.sources, registry);
+    const toggle = cited.length ? sourceToggle(cited, registry) : null;
     const settle = () => {
       if (!card.root.isConnected) return;
       clear(card.text);
-      card.text.append(plain);
+      renderCited(card.text, plain, registry);
       if (ev.cut) card.text.append(h('span', { class: 'sp-cut' }, ' —'));
+      if (toggle) card.text.append(toggle.button);   // 마지막 문장 옆. 자리가 없으면 다음 줄로 넘어간다
     };
     if (!card.started || ev.cut) settle();
     else window.setTimeout(settle, 1500);   // 흘러나오는 움직임이 끝난 뒤 글자 조각을 한 덩어리로 합친다
     const foot = h('div', { class: 'sp-foot' });
     if (ev.cut) foot.append(h('span', { class: 'chip chip--ember' }, '말이 끊김'));
-    for (const s of ev.sources ?? []) {
-      sources.set(s.url, s.title);
-      foot.append(h('a', { class: 'chip', href: s.url, target: '_blank', rel: 'noopener noreferrer' }, icon(Link, 13),
-        String(s.title || s.url).slice(0, 36)));
-    }
+    if (toggle) card.body.append(toggle.panel);
     if (ev.thinking) {
       const think = h('div', { class: 'sp-think hidden' }, ev.thinking);
       foot.append(h('button', { type: 'button', class: 'chip', onclick: () => think.classList.toggle('hidden') }, icon(Brain, 13), '생각 보기'));
@@ -286,7 +316,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     } else if (foot.childElementCount) {
       card.body.append(foot);
     }
-    if ((ev.sources ?? []).length && tab === 'sources') paintSide();
+    if (cited.length && tab === 'sources') paintSide();
     const seat = seats.get(card.speaker);
     if (seat && speaking === card.speaker) setAvatar(seat.av, { state: ev.cut ? 'cut' : 'listening' });
     follow();
@@ -462,9 +492,9 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       case 'research':
         if (ev.status === 'start') { addNotice('search', `진행자가 자료를 조사합니다: ${ev.url}`); setStatus('moderator', Search, '조사 중'); const m = seats.get('moderator'); if (m) setAvatar(m.av, { state: 'searching' }); }
         else if (ev.status === 'search') setStatus('moderator', Search, String(ev.query).slice(0, 14));
-        else { setStatus('moderator', null); const m = seats.get('moderator'); if (m) setAvatar(m.av, { state: 'listening' }); for (const s of ev.sources ?? []) sources.set(s.url, s.title); }
+        else { setStatus('moderator', null); const m = seats.get('moderator'); if (m) setAvatar(m.av, { state: 'listening' }); for (const s of ev.sources ?? []) registry.register(s.url, s.title); if (tab === 'sources') paintSide(); }
         break;
-      case 'briefing': briefing = ev.text; if (tab === 'materials') paintSide(); break;
+      case 'briefing': briefing = ev.text; parseCitations(briefing, registry); if (tab === 'materials') paintSide(); break;
       case 'director': applyDirector(ev); break;
       case 'ready': {
         const seat = seats.get(ev.speaker);
@@ -603,7 +633,7 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     minutesEl = null;
     costEl = null;
     cards.clear();
-    sources.clear();
+    registry.clear();
     track.querySelectorAll('.tick').forEach((t) => t.remove());
     fill.style.width = '0%';
     head.style.left = '0%';

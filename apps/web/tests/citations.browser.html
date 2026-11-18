@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ko" spellcheck="false" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI-Talk 각주·출처 브라우저 검증</title>
+    <style>
+      #report { position: fixed; z-index: 200; right: 1rem; top: 1rem; width: 30rem; max-height: 90vh; overflow: auto; padding: 1rem;
+        background: #14100B; border: 1px solid #5A4A2E; color: #ECE2CC; font: .875rem/1.6 system-ui, sans-serif; }
+      #report h1 { font-size: 1rem; margin: 0 0 .5rem; }
+      #report li.ok::marker { content: '✓ '; color: #46C85A; }
+      #report li.bad::marker { content: '✗ '; color: #FF7A3C; }
+      #report li.bad { color: #FFA070; }
+      #narrow { width: 15rem; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Vite 개발 서버(apps/web에서 npm run dev)를 띄운 뒤 /tests/citations.browser.html 을 연다.
+      실제 화면 코드(mountStage, 출처 목록, 전체화면)를 가상 기록으로 돌려 본다.
+      가상 기록과 가짜 응답은 이 페이지 안에서만 쓴다. 서버나 AI를 부르지 않고, 저장된 토론을 바꾸지 않는다.
+    -->
+    <div id="app"></div>
+    <div id="narrow"></div>
+    <div id="report"><h1>검증 중…</h1><ol></ol></div>
+    <script type="module">
+      import '/src/styles/app.css';
+      import '/src/styles/avatar.css';
+      import { CitationRegistry, collectSources } from '/src/citations.ts';
+      import { installFullscreen, installTooltips } from '/src/ui/dom.ts';
+      import { renderCited, sourceToggle } from '/src/ui/sources.ts';
+      import { mountStage } from '/src/views/stage.ts';
+
+      const A = 'https://news.example/steel/%EC%B2%A0%EA%B0%95-%EC%88%98%EC%B6%9C?utm_source=openai';
+      const B = 'https://news.example/markets/2026/q3';
+      const C = 'https://stats.example/report(2026).html';
+      const D = 'https://blocked.example/%ED%86%B5%EA%B3%84/page';
+      const TITLES = { [A]: '철강 수출 3분기 급증 | 예시 뉴스', [B]: '시장 전망 - 예시 뉴스', [C]: '2026 통계 보고서 :: 예시 통계' };
+
+      const person = (id, name, color) => ({ id, name, title: '참가자', expertise: '', personality: '', speech: '', viewpoint: '',
+        claims: [], concede: '', hidden: '', color, avatar: { set: 'orb', variant: 1 }, tags: [] });
+      let i = 0;
+      const ev = (type, rest = {}) => ({ i: i++, t: i * 0.5, type, ...rest });
+      const speech1 = `수출이 늘었습니다 ([news.example](${A})). 시장도 같은 흐름입니다 [전망 기사](${B}) citeturn1view0.`;
+      const speech2 = `통계로도 확인됩니다 [자료 2] (${C} "통계"). 앞서 나온 기사 ([news.example](${A}))와 같은 결론입니다.`;
+      const config = { topic: '각주 검증용 가상 토론', participants: [person('s1', '가온', '#E0764A'), person('s2', '나래', '#5FB6A8')],
+        model: 'mock-large', effort: 'low', badge: 'on', speed: 'instant', materials: [] };
+      const events = [
+        ev('init', { config, moderator: null }),
+        ev('phase', { phase: 'free', label: '자유토론' }),
+        ev('speech_start', { id: 1, speaker: 's1', kind: 'free', intent: 'add', mood: 'calm' }),
+        ...[speech1.slice(0, 30), speech1.slice(30, 95), speech1.slice(95)].map((text) => ev('delta', { id: 1, text })),
+        ev('speech_end', { id: 1, text: speech1, sources: [{ url: A, title: 'news.example' }, { url: D, title: '자료 3' }] }),
+        ev('clock', { turn: 1, seconds: 20, progress: 0.5 }),
+        ev('speech_start', { id: 2, speaker: 's2', kind: 'free', intent: 'agree', mood: 'agree' }),
+        ev('delta', { id: 2, text: speech2 }),
+        ev('speech_end', { id: 2, text: speech2, sources: [] }),
+        ev('clock', { turn: 2, seconds: 40, progress: 1 }),
+        ev('end', { state: 'ended' }),
+      ];
+      const record = { id: 'demo', config, moderator: null, provider: 'mock', created: '2026-11-18T10:00:00', state: 'ended', live: false,
+        events, speeches: [], summary: null, briefing: '', cost: 0, turns: 2, seconds: 40 };
+
+      const asked = [];   // 제목 조회 요청마다 받은 주소 목록
+      window.fetch = async (url, init) => {
+        const path = String(url);
+        const reply = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        if (path === '/api/debates/demo') return reply(structuredClone(record));
+        if (path === '/api/source-titles') {
+          const urls = JSON.parse(init.body).urls;
+          asked.push(urls);
+          await new Promise((r) => setTimeout(r, 30));
+          return reply({ titles: Object.fromEntries(urls.map((u) => [u, TITLES[u] ?? ''])) });
+        }
+        return new Response('{}', { status: 404 });
+      };
+
+      const results = [];
+      const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: ok ? '' : String(detail) });
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const until = async (test, ms = 2000) => { const end = Date.now() + ms; while (Date.now() < end) { if (test()) return true; await wait(20); } return test(); };
+
+      installTooltips();
+      installFullscreen();
+      const app = document.getElementById('app');
+      const ctx = { status: null, refreshStatus: async () => null, go: () => undefined, reload: () => undefined };
+      mountStage(app, 'demo', ctx);
+      await until(() => app.querySelectorAll('.sp').length === 2 && app.querySelector('.src-btn'));
+
+      const cards = [...app.querySelectorAll('.sp')];
+      const body = (n) => cards[n].querySelector('.sp-text');
+      const fns = (n) => [...body(n).querySelectorAll('a.fn')].map((a) => a.textContent);
+      const plain = (n) => body(n).textContent;
+
+      check('본문에 주소와 마크다운 링크 문법이 남지 않는다', !/https?:|\]\(|%EC|utm_source/.test(plain(0) + plain(1)), plain(0) + plain(1));
+      check('AI 내부 인용 표식이 보이지 않는다', !/turn\d|cite/.test(plain(0)), plain(0));
+      check('첫 발언의 각주는 [1], [2]', fns(0).join('') === '[1][2]', fns(0));
+      check('다른 발언의 같은 기사는 같은 번호, 새 자료는 새 번호', fns(1).join('') === '[4][1]', fns(1));
+      check('각주는 그 주소로 새 탭에서 열린다', body(0).querySelector('a.fn').href === A && body(0).querySelector('a.fn').target === '_blank');
+      check('문장의 일부인 링크 이름은 글로 남는다', plain(0).includes('전망 기사[2]') && !plain(0).includes('news.example'), plain(0));
+
+      const btn = cards[0].querySelector('.src-btn');
+      const panel = cards[0].querySelector('.src-panel');
+      check('출처 버튼은 글자 없이 아이콘만 있다', btn.textContent.trim() === '' && !!btn.querySelector('svg'));
+      check('출처 버튼은 마지막 문장 옆(본문 안)에 있다', btn.parentElement === body(0) && body(0).lastElementChild === btn);
+      const lastFn = [...body(0).querySelectorAll('a.fn')].pop().getBoundingClientRect();
+      const btnBox = btn.getBoundingClientRect();
+      check('넓은 화면에서는 마지막 줄과 같은 줄에 놓인다', btnBox.top < lastFn.bottom && btnBox.bottom > lastFn.top, `${btnBox.top} / ${lastFn.top}`);
+      check('접힌 상태의 이름과 펼침 상태를 알린다', btn.getAttribute('aria-label') === '출처 보기' && btn.getAttribute('aria-expanded') === 'false');
+      check('접혀 있는 동안에는 제목을 조회하지 않는다', asked.length === 0 && panel.classList.contains('hidden'), asked.length);
+      check('브라우저 기본 title 툴팁을 쓰지 않는다', !btn.hasAttribute('title') && btn.dataset.tip === '출처 보기');
+
+      btn.click();
+      const rows = () => [...panel.querySelectorAll('.srcs-item')];
+      check('누르면 목록이 펼쳐지고 이름이 바뀐다', !panel.classList.contains('hidden') && btn.getAttribute('aria-label') === '출처 접기' && btn.getAttribute('aria-expanded') === 'true');
+      check('도메인별로 묶인다', [...panel.querySelectorAll('.srcs-host')].map((el) => el.textContent).join(',') === 'news.example,blocked.example', panel.textContent);
+      check('목록의 번호가 본문의 각주 번호와 같다', rows().map((r) => r.querySelector('.srcs-no').textContent).join('') === '[1][2][3]');
+      check('제목을 받기 전에는 풀어 쓴 주소를 보여 준다', rows()[2].querySelector('.srcs-name').textContent === '통계/page', rows()[2].textContent);
+      await until(() => rows()[0].querySelector('.srcs-name').textContent === TITLES[A]);
+      check('펼치면 실제 탭 제목으로 바뀐다', rows()[0].querySelector('.srcs-name').textContent === TITLES[A] && rows()[1].querySelector('.srcs-name').textContent === TITLES[B], rows()[0].textContent);
+      check('제목이 바뀌어도 번호와 링크는 그대로다', rows()[0].querySelector('.srcs-no').textContent === '[1]' && rows()[0].href === A);
+      check('조회에 실패한 자료는 기존 표시를 둔다', rows()[2].querySelector('.srcs-name').textContent === '통계/page');
+      check('툴팁에 제목과 원래 주소가 함께 있다', rows()[0].dataset.tip === `${TITLES[A]}\n${A}`, rows()[0].dataset.tip);
+      check('한 번의 요청으로 그 발언의 주소만 묻는다', asked.length === 1 && asked[0].length === 3, JSON.stringify(asked));
+      const name = getComputedStyle(rows()[0].querySelector('.srcs-name'));
+      check('긴 제목은 한 줄 말줄임으로 보인다', name.whiteSpace === 'nowrap' && name.textOverflow === 'ellipsis');
+      const sizes = ['.fn', '.srcs-item', '.srcs-host'].map((sel) => parseFloat(getComputedStyle(app.querySelector(sel)).fontSize));
+      check('각주와 목록의 글자가 13px보다 작지 않다', sizes.every((px) => px >= 13), sizes);
+
+      btn.click();
+      check('다시 누르면 접힌다', panel.classList.contains('hidden') && btn.getAttribute('aria-expanded') === 'false');
+      btn.click();
+      await wait(80);
+      check('다시 열어도 제목을 다시 조회하지 않는다', asked.length === 1, asked.length);
+
+      // 다른 발언의 목록: 이미 받은 주소는 요청을 함께 쓴다
+      cards[1].querySelector('.src-btn').click();
+      await until(() => cards[1].querySelector('.srcs-name')?.textContent === TITLES[C]);
+      check('이미 조회한 주소는 다시 묻지 않고 새 주소만 묻는다', asked.length === 2 && asked[1].join() === C, JSON.stringify(asked));
+      check('괄호가 든 주소도 온전히 읽는다', cards[1].querySelector('.srcs-item').href === C);
+
+      // 좁은 자리에서는 버튼이 다음 줄로 넘어간다
+      const narrow = document.getElementById('narrow');
+      const reg = new CitationRegistry();
+      const line = document.createElement('div');
+      line.className = 'sp-text';
+      narrow.append(line);
+      const text = '가나다라마바사아자차카타파하가나다라마바사 [기사](https://a.example/x)';
+      renderCited(line, text, reg);
+      const toggle = sourceToggle(collectSources(text, [], reg), reg);
+      line.append(toggle.button);
+      narrow.append(toggle.panel);
+      const fnBox = line.querySelector('a.fn').getBoundingClientRect();
+      check('좁은 자리에서는 버튼이 넘치지 않고 줄을 바꾼다', toggle.button.getBoundingClientRect().right <= narrow.getBoundingClientRect().right + 1
+        && toggle.button.getBoundingClientRect().top >= fnBox.top - 4);
+
+      // 출처 패널(옆 패널)도 같은 번호를 쓴다
+      app.querySelector('[aria-label="옆 패널 열고 닫기"]').click();
+      [...app.querySelectorAll('.side-tabs button')].find((b) => b.textContent === '출처').click();
+      const side = [...app.querySelectorAll('.side-body .srcs-item')];
+      check('출처 패널이 같은 번호 체계를 쓴다', side.map((r) => r.querySelector('.srcs-no').textContent).join('') === '[1][2][3][4]', side.map((r) => r.textContent));
+      check('출처 패널에도 실제 제목이 반영된다', side[0].querySelector('.srcs-name').textContent === TITLES[A]);
+
+      // 처음부터 다시 보기: 같은 기록에서 같은 번호
+      [...app.querySelectorAll('.controls .btn')].find((b) => b.textContent.includes('끝까지') || b.textContent.includes('다시 보기')).click();
+      await wait(50);
+      const skip = [...app.querySelectorAll('.controls .btn')].find((b) => b.textContent.includes('끝까지 보기'));
+      if (skip) skip.click();
+      await until(() => app.querySelectorAll('.sp a.fn').length === 4);
+      check('다시 보아도 번호가 같다', [...app.querySelectorAll('.sp a.fn')].map((a) => a.textContent).join('') === '[1][2][4][1]',
+        [...app.querySelectorAll('.sp a.fn')].map((a) => a.textContent));
+
+      // 전체화면: 마우스 우클릭만 가로챈다
+      let asks = 0;
+      document.documentElement.requestFullscreen = () => { asks += 1; return new Promise((r) => setTimeout(r, 30)); };
+      Object.defineProperty(document, 'fullscreenEnabled', { configurable: true, get: () => true });
+      const menu = (button) => new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button });
+      const mouse = menu(2);
+      app.querySelector('.stage-topic').dispatchEvent(mouse);
+      check('마우스 우클릭은 기본 메뉴를 막고 전체화면을 요청한다', mouse.defaultPrevented && asks === 1, asks);
+      const again = menu(2);
+      document.querySelector('.topbar, #app').dispatchEvent(again);
+      check('전환이 끝나기 전의 우클릭은 요청을 겹치지 않는다', again.defaultPrevented && asks === 1, asks);
+      const keyboard = menu(0);
+      app.dispatchEvent(keyboard);
+      check('키보드 메뉴 키는 기본 메뉴를 그대로 둔다', !keyboard.defaultPrevented);
+      await wait(60);
+      document.body.dispatchEvent(menu(2));
+      check('전환이 끝나면 다시 요청할 수 있다', asks === 2, asks);
+      check('맞춤법 검사가 꺼져 있다', document.documentElement.getAttribute('spellcheck') === 'false');
+
+      const failed = results.filter((r) => !r.ok);
+      const report = document.getElementById('report');
+      report.querySelector('h1').textContent = failed.length ? `검사 ${results.length}개 가운데 ${failed.length}개 실패` : `검사 ${results.length}개 통과`;
+      for (const r of results) {
+        const li = document.createElement('li');
+        li.className = r.ok ? 'ok' : 'bad';
+        li.textContent = r.ok ? r.name : `${r.name} → ${r.detail}`;
+        report.querySelector('ol').append(li);
+      }
+      window.__results = results;
+      document.title = failed.length ? `실패 ${failed.length}` : `통과 ${results.length}`;
+    </script>
+  </body>
+</html>

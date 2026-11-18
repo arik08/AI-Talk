@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import console, materials, prompts, providers, store
+from . import console, materials, prompts, providers, source_titles, store
 from .config import WEB_DIST, lan_addresses, settings
 from .engine import Debate
 from .providers import get_provider
@@ -223,6 +223,19 @@ async def material_upload(file: UploadFile = File(...)) -> dict:
         raise HTTPException(400, str(exc)) from exc
     return {"name": file.filename, "text": text, "chars": len(text),
             "tokens": materials.estimate_tokens(text)}
+
+
+# ---------------------------------------------------------------- 출처 제목
+class SourceTitlesIn(BaseModel):
+    urls: list[str] = Field(default_factory=list)
+
+
+@app.post("/api/source-titles")
+async def source_title_lookup(body: SourceTitlesIn) -> dict:
+    """출처 페이지의 실제 탭 제목을 한꺼번에 조회한다. 조회하지 못한 주소는 빈 문자열로 돌려준다."""
+    if len(body.urls) > source_titles.MAX_URLS:
+        raise HTTPException(400, f"한 번에 {source_titles.MAX_URLS}개까지 조회할 수 있습니다.")
+    return {"titles": await source_titles.fetch_titles(body.urls)}
 
 
 # ---------------------------------------------------------------- 토론

@@ -233,6 +233,7 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 .tip {
   position: fixed; z-index: 100; max-width: 20rem; padding: .3rem .625rem; border-radius: var(--r);
   background: var(--pop); border: 1px solid var(--line-hi); color: var(--text); font-size: .8125rem; line-height: 1.5;
+  white-space: pre-line; overflow-wrap: anywhere;
   pointer-events: none; opacity: 0; transform: translateY(3px); transition: opacity .12s var(--ease), transform .12s var(--ease);
 }
 .tip.is-on { opacity: 1; transform: none; }
@@ -418,6 +419,20 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 @keyframes ch-in { 0% { opacity: 0; color: var(--ct, var(--c)); } 45% { opacity: 1; color: var(--ct, var(--c)); } 100% { opacity: 1; } }
 .sp-text .caret { display: inline-block; width: .5rem; height: 1.05em; margin-left: .125rem; vertical-align: -.15em; background: var(--c); animation: pulse .9s steps(2) infinite; }
 .sp-cut { color: var(--ember); font-weight: 600; }
+/* 각주와 출처: 본문에는 번호만, 마지막 문장 옆의 링크 아이콘을 누르면 도메인별 목록이 펼쳐진다 */
+.fn { margin: 0 .0625rem; color: var(--gold); font-size: .8125rem; font-variant-numeric: tabular-nums; vertical-align: .25em; line-height: 1; white-space: nowrap; text-decoration: none; }
+.fn:hover, .fn:focus-visible { color: var(--gold-hi); text-decoration: underline; }
+.src-btn { display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; margin-left: .375rem; padding: 0; vertical-align: -.35em; border: 1px solid var(--line); border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer; transition: color .15s var(--ease), border-color .15s var(--ease); }
+.src-btn:hover, .src-btn.is-on { color: var(--gold-hi); border-color: var(--line-hi); }
+.src-btn:focus-visible, .fn:focus-visible, .srcs-item:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.src-panel { margin-top: .5rem; padding: .5rem .75rem; max-height: 15rem; overflow-y: auto; border-left: 2px solid var(--gold-lo); background: var(--panel); }
+.srcs { display: flex; flex-direction: column; gap: .625rem; min-width: 0; }
+.srcs-host { margin-bottom: .125rem; color: var(--dim); font-size: .8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srcs-item { display: flex; align-items: baseline; gap: .5rem; min-width: 0; padding: .1875rem 0; color: var(--text); font-size: .875rem; line-height: 1.5; text-decoration: none; }
+.srcs-item:hover .srcs-name { color: var(--gold-hi); text-decoration: underline; }
+.srcs-no { flex: none; color: var(--gold); font-variant-numeric: tabular-nums; }
+.srcs-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brief .fn { vertical-align: .2em; }
 .sp-foot { display: flex; flex-wrap: wrap; gap: .375rem; margin-top: .5rem; }
 .sp-foot a.chip:hover { border-color: var(--gold); color: var(--gold-hi); }
 .sp-think { margin-top: .5rem; padding: .5rem .75rem; border-left: 2px solid var(--line-hi); color: var(--muted); font-size: .875rem; line-height: 1.65; white-space: pre-wrap; }

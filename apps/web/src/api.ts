@@ -43,6 +43,8 @@ export const api = {
   debate: (id: string) => request<DebateRecord>(`/api/debates/${id}`),
   deleteDebate: (id: string) => request<{ ok: boolean }>(`/api/debates/${id}`, { method: 'DELETE' }),
   minutes: (id: string) => request<{ minutes: any; cost: number; cost_parts: Record<string, number> }>(`/api/debates/${id}/minutes`, { method: 'POST' }),
+  /** 출처 페이지의 실제 탭 제목. 한 번에 20개까지. 조회하지 못한 주소는 빈 문자열로 온다. */
+  sourceTitles: (urls: string[]) => request<{ titles: Record<string, string> }>('/api/source-titles', json({ urls })),
   control: (id: string, action: string, value?: unknown) =>
     request<{ state: string }>(`/api/debates/${id}/control`, json({ action, value })),
 };

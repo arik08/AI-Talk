@@ -90,6 +90,27 @@ export function installTooltips(): void {
   window.addEventListener('blur', hideTip);
 }
 
+/* ---------- 전체화면: 어느 화면에서든 마우스 우클릭으로 켜고 끈다. Esc로도 풀린다 ---------- */
+export function installFullscreen(): void {
+  let busy = false;   // 전환이 끝나기 전에 또 누른 것은 무시한다
+  // 캡처 단계에서 문서 전체에 한 번만 건다. 상단 메뉴, 입력 칸, 팝업 위에서도 같게 동작하고 화면을 옮겨도 남는다
+  document.addEventListener('contextmenu', (e) => {
+    if (e.button !== 2) return;   // 메뉴 키와 Shift+F10은 브라우저의 메뉴를 그대로 둔다
+    e.preventDefault();
+    if (busy) return;
+    const root = document.documentElement;   // 본문에 붙는 툴팁과 알림까지 함께 보이도록 문서 전체를 대상으로 한다
+    if (!document.fullscreenEnabled || typeof root.requestFullscreen !== 'function') {
+      toast('이 브라우저에서는 전체화면을 쓸 수 없습니다.', 'error');
+      return;
+    }
+    busy = true;
+    const going = document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen();
+    Promise.resolve(going)
+      .catch(() => toast('전체화면으로 바꾸지 못했습니다. 다시 눌러 주세요.', 'error'))
+      .finally(() => { busy = false; });
+  }, true);
+}
+
 /* ---------- 삭제 버튼: 휴지통 → 경고 아이콘 → 한 번 더 눌러야 지운다 ---------- */
 export function deleteButton(onDelete: () => void, size = 18): HTMLButtonElement {
   let armed = false;
