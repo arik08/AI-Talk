@@ -487,6 +487,9 @@ export function mountNewDebate(root: HTMLElement, ctx: AppContext): () => void {
     card.append(menu);
     menu.style.left = '1rem';
     menu.style.bottom = '3.25rem';
+    // 아래에 맞춰 자리를 잡은 뒤 위쪽을 못박는다: 찾아서 목록이 짧아져도 검색창은 제자리에 있고 메뉴 아래쪽만 줄어든다
+    menu.style.top = `${menu.offsetTop}px`;
+    menu.style.bottom = 'auto';
   }
   const onDocClick = (e: MouseEvent) => {
     const target = e.target as HTMLElement;   // 체크하면 목록을 다시 그리므로, 눌린 줄이 이미 화면에서 빠졌으면 메뉴 안을 누른 것이다
