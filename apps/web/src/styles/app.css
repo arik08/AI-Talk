@@ -461,7 +461,7 @@ button.chip:hover, .chip.is-on { border-color: var(--gold); color: var(--gold-hi
 /* 각주와 출처: 본문에는 번호만, 마지막 문장 옆의 링크 아이콘을 누르면 도메인별 목록이 펼쳐진다 */
 .fn { margin: 0 .0625rem; color: var(--gold); font-size: .8125rem; font-variant-numeric: tabular-nums; vertical-align: .25em; line-height: 1; white-space: nowrap; text-decoration: none; }
 .fn:hover, .fn:focus-visible { color: var(--gold-hi); text-decoration: underline; }
-.src-btn { display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; margin-left: .375rem; padding: 0; vertical-align: -.35em; border: 1px solid var(--line); border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer; transition: color .15s var(--ease), border-color .15s var(--ease); }
+.src-btn { display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; margin-left: .375rem; padding: 0; vertical-align: -.1em; border: 1px solid var(--line); border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer; transition: color .15s var(--ease), border-color .15s var(--ease); }
 .src-btn:hover, .src-btn.is-on { color: var(--gold-hi); border-color: var(--line-hi); }
 .src-btn:focus-visible, .fn:focus-visible, .srcs-item:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .src-panel { margin-top: .5rem; padding: .5rem .75rem; max-height: 15rem; overflow-y: auto; border-left: 2px solid var(--gold-lo); background: var(--panel); }

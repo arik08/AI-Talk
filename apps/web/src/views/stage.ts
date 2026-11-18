@@ -323,25 +323,32 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     // 출처는 여기서 바로 번호표에 올린다 (다시 볼 때도 같은 순서로 올라가 번호가 같다)
     const cited = collectSources(plain, ev.sources, registry);
     const toggle = cited.length ? sourceToggle(cited, registry) : null;
+    // 생각 보기도 출처처럼 마지막 문장 옆의 아이콘 버튼이다. 누르면 발언 아래에 생각이 펼쳐진다
+    const think = ev.thinking ? h('div', { class: 'sp-think hidden' }, ev.thinking) : null;
+    const thinkBtn = think ? h('button', { type: 'button', class: 'src-btn', tip: '생각 보기', 'aria-label': '생각 보기', 'aria-expanded': 'false' }, icon(Brain, 15)) : null;
+    thinkBtn?.addEventListener('click', () => {
+      const open = think!.classList.toggle('hidden') === false;
+      const label = open ? '생각 접기' : '생각 보기';
+      thinkBtn.dataset.tip = label;
+      thinkBtn.setAttribute('aria-label', label);
+      thinkBtn.setAttribute('aria-expanded', String(open));
+      thinkBtn.classList.toggle('is-on', open);
+    });
     const settle = () => {
       if (!card.root.isConnected) return;
       clear(card.text);
       const tail = renderSpeech(card.text, plain, registry);
       if (ev.cut) tail.append(h('span', { class: 'sp-cut' }, ' —'));
       if (toggle) tail.append(toggle.button);   // 마지막 문장 옆. 자리가 없으면 다음 줄로 넘어간다
+      if (thinkBtn) tail.append(thinkBtn);
     };
     if (!card.started || ev.cut) settle();
     else window.setTimeout(settle, 1500);   // 흘러나오는 움직임이 끝난 뒤 글자 조각을 한 덩어리로 합친다
     const foot = h('div', { class: 'sp-foot' });
     if (ev.cut) foot.append(h('span', { class: 'chip chip--ember' }, '말이 끊김'));
     if (toggle) card.body.append(toggle.panel);
-    if (ev.thinking) {
-      const think = h('div', { class: 'sp-think hidden' }, ev.thinking);
-      foot.append(h('button', { type: 'button', class: 'chip', onclick: () => think.classList.toggle('hidden') }, icon(Brain, 13), '생각 보기'));
-      card.body.append(foot, think);
-    } else if (foot.childElementCount) {
-      card.body.append(foot);
-    }
+    if (foot.childElementCount) card.body.append(foot);
+    if (think) card.body.append(think);
     if (cited.length && tab === 'sources') paintSide();
     const seat = seats.get(card.speaker);
     if (seat && speaking === card.speaker) setAvatar(seat.av, { state: ev.cut ? 'cut' : 'listening' });
