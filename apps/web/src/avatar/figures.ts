@@ -520,6 +520,68 @@ export const FIGURES: Figure[] = [
     hair: p('M29 41 Q28 20 50 20 Q72 20 71 41 Q66 28.5 50 28 Q34 28.5 29 41Z', '#A8A8AC')
       + both((f) => p(`M${f(27)} 49 Q${f(25.5)} 38 ${f(29)} 34 L${f(31)} 46Z`, '#A8A8AC', 0.8)),
     over: glassesThin('#3E3E44') },
+
+  // 숱 적은 흰 머리, 주름 깊은 갸름한 얼굴, 흰 두루마기
+  { name: '이승만', skin: '#EBC9A8', face: 'long', brow: '#D6D6D6',
+    clothes: shoulders('#F1EDE2'), front: p('M42 81 L50 91 L58 81 L56 78 L50 86 L44 78Z', WHITE) + l('M50 91 L47 102', '#C9C3B2', 1.1),
+    marks: NOSE.long + FOREHEAD + SMILE_LINES + UNDER_EYES + l('M36 27 Q50 24 64 27', SH, 0.9, 0.7),
+    hair: p('M29 40 Q28 19 50 19 Q72 19 71 40 Q65 27 50 26 Q35 27 29 40Z', '#EDEDED')
+      + both((f) => p(`M${f(27)} 49 Q${f(25.5)} 38 ${f(29)} 34 L${f(31)} 46Z`, '#EDEDED', 0.8)) },
+
+  // 벗겨진 머리, 굵은 눈썹, 각진 얼굴, 깃에 별을 단 군복
+  { name: '전두환', skin: '#E3B68E', face: 'square', brow: '#1A1A1C', browH: 4.2,
+    clothes: shoulders('#5B6240') + both((f) => p(`M${f(13)} 90 L${f(30)} 85.5 L${f(31)} 90.5 L${f(14)} 95.5Z`, '#4A5034', 0.8)),
+    front: p('M42 81 L50 90 L58 81 L63 84.5 L54 96 L50 91.5 L46 96 L37 84.5Z', '#4E5537')
+      + both((f) => c(f(42.5), 88.5, 1.5, GOLD, 0.4)),
+    marks: NOSE.big + SMILE_LINES + soft('M36 24 Q44 20 52 22 Q44 23.5 36 27Z', '#FFFFFF', 0.35)
+      + l('M38 32 Q50 29.5 62 32', SH, 0.9, 0.7),
+    hair: both((f) => p(`M${f(26)} 50 Q${f(23.5)} 36 ${f(30)} 30 L${f(31.5)} 43Z`, '#1A1A1C', 0.9)) },
+
+  // 가르마를 탄 검은 머리, 큰 귀, 웃는 인상, 정장과 푸른 넥타이
+  { name: '노태우', skin: '#E8BE98', face: 'oval', brow: '#222224', earR: 6.6, ...suit('#2A2E3A', '#2F5D9B'),
+    marks: NOSE.big + SMILE_LINES + UNDER_EYES,
+    hair: p('M26 45 Q22 17 50 17 Q78 17 74 45 Q72 31 62 28 Q46 24 35 30 Q28 35 26 45Z', '#222224')
+      + l('M36 29 Q50 21 66 27', '#48484C', 0.9) },
+
+  // 풍성하게 넘긴 은발, 갸름한 얼굴, 정장과 붉은 넥타이
+  { name: '김영삼', skin: '#EDC6A4', face: 'long', brow: '#B8B8BC', ...suit('#232733', '#B8322C'),
+    marks: NOSE.long + FOREHEAD + SMILE_LINES,
+    hair: p('M25 46 Q19 14 52 14 Q83 15 75 46 Q73 30 60 27 Q44 24 33 30 Q27 34 25 46Z', '#E2E2E6')
+      + l('M30 29 Q50 17 72 27', '#AEAEB4', 1) + l('M34 25 Q52 15 68 22', '#AEAEB4', 0.9) },
+
+  // 뒤로 빗어 넘긴 검은 머리, 살진 얼굴과 처진 눈 밑, 정장과 짙은 녹색 넥타이
+  { name: '김대중', skin: '#E6BC98', face: 'jowly', brow: '#2A2A2C', ...suit('#23262E', '#2F6B4F'),
+    marks: NOSE.big + FOREHEAD + SMILE_LINES + UNDER_EYES + l('M34 59.5 Q39.5 62.5 45 59.5', SH, 0.9, 0.6) + l('M55 59.5 Q60.5 62.5 66 59.5', SH, 0.9, 0.6),
+    hair: p('M26 43 Q24 17 50 17 Q76 17 74 43 Q68 27 50 26 Q32 27 26 43Z', '#1E1E20')
+      + l('M34 24 Q50 18 66 24', '#44444A', 0.9) + l('M42 21 L42 26', '#44444A', 0.8) + l('M58 21 L58 26', '#44444A', 0.8) },
+
+  // 이마를 가로지르는 깊은 주름 한 줄, 검은 머리, 정장과 노란 넥타이
+  { name: '노무현', skin: '#E7BB94', face: 'oval', brow: '#1E1E20', ...suit('#262A34', '#E8C22E'),
+    marks: NOSE.big + l('M34 33.5 Q50 30.5 66 33.5', SH, 1.7, 0.95) + SMILE_LINES,
+    hair: p('M26 44 Q23 17 50 17 Q77 17 74 44 Q72 30 62 27 Q48 23 36 29 Q29 33 26 44Z', '#1E1E20') },
+
+  // 숱이 줄어든 짙은 머리, 갸름한 얼굴, 가는 테 안경, 정장과 푸른 넥타이
+  { name: '이명박', skin: '#E9C09C', face: 'long', brow: '#3A3A3E', ...suit('#20242E', '#2F6DB5'),
+    marks: NOSE.long + FOREHEAD + SMILE_LINES,
+    hair: p('M29 41 Q28 19 50 19 Q72 19 71 41 Q66 28 54 26 Q40 25 33 31 Q30 35 29 41Z', '#3A3A3E')
+      + both((f) => p(`M${f(27)} 49 Q${f(25.5)} 38 ${f(29)} 34 L${f(31)} 46Z`, '#3A3A3E', 0.8)),
+    over: glassesThin('#3A3A3E') },
+
+  // 뒤로 부풀려 올린 머리, 깃을 세운 푸른 재킷과 브로치
+  { name: '박근혜', skin: '#F2D2BA', face: 'oval', brow: '#3A2C26', browH: 2.4,
+    clothes: shoulders('#2F5D9B') + c(34, 92, 2.4, GOLD, 0.6),
+    back: p('M19 48 Q10 8 50 6 Q90 8 81 48 Q84 60 77 66 L23 66 Q16 60 19 48Z', '#2A2220'),
+    front: p('M41.5 76 Q50 80 58.5 76 L60 84 Q50 88.5 40 84Z', '#2F5D9B') + l('M50 80 L50 88', '#234A7E', 1),
+    marks: NOSE.soft + SMILE_LINES,
+    hair: p('M22 52 Q14 12 50 11 Q86 12 78 52 Q76 36 67 30 Q56 23 44 26 Q28 31 22 52Z', '#2A2220')
+      + l('M30 32 Q42 19 58 21', '#4A3E3A', 1) + l('M62 22 Q71 27 74 37', '#4A3E3A', 1) },
+
+  // 옆으로 넘긴 은회색 머리, 가는 테 안경, 온화한 얼굴, 남색 정장과 푸른 넥타이
+  { name: '문재인', skin: '#EBC4A0', face: 'oval', brow: '#8E8E92', ...suit('#1F2A44', '#3B6FB5'),
+    marks: NOSE.soft + FOREHEAD + SMILE_LINES,
+    hair: p('M26 45 Q22 17 50 17 Q78 17 74 45 Q72 32 64 28 Q48 23 35 30 Q28 35 26 45Z', '#C4C4C8')
+      + l('M35 29 Q49 20 67 26', '#96969C', 0.9),
+    over: glassesThin('#4A4A50') },
 ];
 
 /** 둥근 틀 안에 들어가는 그림(눈썹·눈·입 아래). */
