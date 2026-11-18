@@ -603,8 +603,15 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
     const draft = (qaEl?.querySelector('.qa-input') as HTMLInputElement | null)?.value ?? '';
     qaEl?.remove();
     const items = h('div', { class: 'qa-list' });
+    // 답은 발언과 같은 표기(굵게, 목록, 표, 막대 그림)로 온다. 토론의 출처 번호와 섞이지 않게 번호표는 따로 쓴다
+    const notes = new CitationRegistry();
+    const write = (answer: HTMLElement, a: string, streaming = false) => {
+      clear(answer);
+      drawSpeech(answer, speechBlocks(parseCitations(a, notes, { streaming }), streaming));
+    };
     const item = (q: string, a: string) => {
-      const answer = h('div', { class: 'qa-a' }, a);
+      const answer = h('div', { class: 'qa-a sp-text' });
+      write(answer, a);
       items.append(h('div', { class: 'qa-item' }, h('div', { class: 'qa-q' }, q), answer));
       return answer;
     };
@@ -635,11 +642,11 @@ export function mountStage(root: HTMLElement, id: string, ctx: AppContext): () =
       try {
         const res = await api.ask(id, question, (piece) => {
           text2 += piece;
-          answer.textContent = text2;
+          write(answer, text2, true);
           follow();
         });
         record.qa = res.qa;
-        answer.textContent = res.qa[res.qa.length - 1]?.a ?? text2;
+        write(answer, res.qa[res.qa.length - 1]?.a ?? text2);
         applyCost(res);
       } catch (err) {
         row.remove();

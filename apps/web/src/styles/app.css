@@ -668,7 +668,10 @@ code { font-family: Consolas, "D2Coding", monospace; font-size: .9375rem; color:
 .qa-item { padding: 1rem 0; border-top: 1px solid var(--line); }
 .qa-q { color: var(--gold-hi); font-weight: 500; line-height: 1.7; }
 .qa-q::before { content: "Q"; margin-right: .625rem; font-family: var(--font-head); color: var(--gold); }
-.qa-a { margin-top: .5rem; color: var(--text); line-height: 1.75; white-space: pre-wrap; }
+.qa-a { --c: var(--gold); --ct: var(--gold); margin-top: .5rem; color: var(--text); font-size: 1rem; line-height: 1.75; white-space: pre-wrap; }
+.qa-a.sp-rich { white-space: normal; gap: .625rem; }
+.qa-a .sp-table { width: 100%; }
+.qa-a .sp-table td { white-space: normal; }
 .qa-hints { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .875rem; }
 .qa-hints:empty { display: none; }
 .qa-form { display: flex; align-items: center; gap: .5rem; margin-top: .875rem; }
